@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>法律英语大赛证书查询系统</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(145deg, #f0f4fa 0%, #e2e8f0 100%);
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            padding: 2rem 1.5rem;
+        }
+        .system-wrapper { max-width: 1400px; margin: 0 auto; }
+
+        .title-section { text-align: center; margin: 0.5rem 0 2rem 0; }
+        .main-title {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #1f3e48, #9b2e2e);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+        .title-underline {
+            width: 120px;
+            height: 4px;
+            background: linear-gradient(90deg, #b87c4f, #9b2e2e);
+            margin: 0.5rem auto 0;
+            border-radius: 4px;
+        }
+        .button-group {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-bottom: 2.5rem;
+            flex-wrap: wrap;
+        }
+        .cert-btn {
+            background: white;
+            border: none;
+            padding: 0.9rem 2.2rem;
+            border-radius: 3rem;
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #2c4c6e;
+            border: 1px solid #e0e7ed;
+            box-shadow: 0 5px 12px rgba(0,0,0,0.1);
+        }
+        .cert-btn.active {
+            background: linear-gradient(135deg, #2c5a6e, #8b3c3c);
+            color: white;
+            border: none;
+            transform: translateY(-2px);
+        }
+        .query-layout { display: flex; flex-wrap: wrap; gap: 2rem; }
+        .query-card {
+            flex: 1.2;
+            min-width: 300px;
+            background: rgba(255,255,255,0.96);
+            border-radius: 2rem;
+            padding: 1.8rem;
+            box-shadow: 0 20px 35px -10px rgba(0,0,0,0.12);
+        }
+        .query-header { text-align: center; margin-bottom: 1.5rem; }
+        .query-header i {
+            font-size: 2.2rem;
+            background: #f0e7db;
+            padding: 0.6rem;
+            border-radius: 60px;
+            color: #8b5a2b;
+        }
+        .query-header h3 { margin-top: 0.5rem; font-weight: 700; color: #2c4c6e; }
+        .input-group {
+            margin-bottom: 1.2rem;
+            display: flex;
+            flex-direction: column;
+        }
+        .input-group label {
+            font-weight: 600;
+            margin-bottom: 0.4rem;
+            color: #2c5a6e;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .input-group input {
+            padding: 0.8rem 1rem;
+            border-radius: 1.2rem;
+            border: 1.5px solid #e2e8f0;
+            font-size: 0.95rem;
+            outline: none;
+        }
+        .btn-query {
+            background: linear-gradient(95deg, #2c5a6e, #9b2e2e);
+            width: 100%;
+            padding: 0.9rem;
+            border: none;
+            border-radius: 3rem;
+            color: white;
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .error-msg {
+            background: #ffe8e6;
+            color: #c2412c;
+            padding: 0.8rem;
+            border-radius: 1.2rem;
+            margin-top: 1rem;
+            text-align: center;
+            font-size: 0.85rem;
+            display: none;
+        }
+        .certificate-card {
+            flex: 2;
+            min-width: 500px;
+            background: #fffef7;
+            border-radius: 2rem;
+            box-shadow: 0 25px 40px -12px rgba(0,0,0,0.25);
+            overflow: auto;
+            max-height: 85vh;
+            border: 1px solid #eeddbb;
+        }
+        .certificate-preview {
+            padding: 2rem;
+            background: #f5f5f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .pdf-container {
+            background: white;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+            border-radius: 8px;
+            overflow: hidden;
+            max-width: 100%;
+        }
+        .result-canvas { display: block; max-width: 100%; height: auto; }
+        .btn-download {
+            background: #2c5f2d;
+            border: none;
+            color: white;
+            padding: 0.7rem 1.5rem;
+            border-radius: 2rem;
+            font-weight: 600;
+            margin-top: 1.5rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .empty-state { padding: 3rem; text-align: center; color: #a28e6f; }
+        .loading { text-align: center; padding: 2rem; color: #2c5a6e; }
+        .loading i { font-size: 2rem; margin-bottom: 1rem; }
+        @media (max-width: 780px) {
+            .certificate-preview { padding: 1rem; }
+            .main-title { font-size: 1.8rem; }
+            .certificate-card { min-width: 300px; }
+        }
+    </style>
+</head>
+<body>
+<div class="system-wrapper">
+    <div class="title-section">
+        <div class="main-title">法律英语大赛证书查询</div>
+        <div class="title-underline"></div>
+    </div>
+
+    <div class="button-group">
+        <button class="cert-btn active" id="btnParticipation"><i class="fas fa-scroll"></i> 参赛证明</button>
+        <button class="cert-btn" id="btnPreliminary"><i class="fas fa-trophy"></i> 预赛获奖证书</button>
+        <button class="cert-btn" id="btnFinal"><i class="fas fa-crown"></i> 决赛获奖证书</button>
+    </div>
+
+    <div class="query-layout">
+        <div class="query-card">
+            <div class="query-header">
+                <i class="fas fa-user-check"></i>
+                <h3>选手信息核验</h3>
+                <p style="font-size:0.75rem;">请输入以下四项信息查询证书</p>
+            </div>
+            <div class="input-group">
+                <label><i class="fas fa-user"></i> 姓名</label>
+                <input type="text" id="fullname" placeholder="请输入真实姓名">
+            </div>
+            <div class="input-group">
+                <label><i class="fas fa-map-marker-alt"></i> 赛区</label>
+                <input type="text" id="region" placeholder="例: 华北及东北赛区">
+            </div>
+            <div class="input-group">
+                <label><i class="fas fa-mobile-alt"></i> 手机号</label>
+                <input type="tel" id="phone" placeholder="11位手机号" maxlength="11">
+            </div>
+            <div class="input-group">
+                <label><i class="fas fa-building"></i> 所在单位</label>
+                <input type="text" id="organization" placeholder="学校/机构">
+            </div>
+            <button class="btn-query" id="searchBtn"><i class="fas fa-search"></i> 查询证书</button>
+            <div id="errorMsg" class="error-msg"><i class="fas fa-exclamation-triangle"></i> <span>未查找到您的信息</span></div>
+        </div>
+
+        <div class="certificate-card">
+            <div id="certificateRenderArea" class="certificate-preview">
+                <div class="empty-state"><i class="fas fa-file-pdf"></i><p>请输入信息查询证书</p></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+    let pdfTemplates = {};
+    let pdfTemplatesPrelim = {};
+    let pdfTemplatesFinal = {};
+    let currentCertType = "participation";
+    let currentResultCanvas = null;
+
+    const validRegions = ["华北及东北赛区", "西北赛区", "西南赛区", "华东赛区", "华南赛区"];
+
+    // ========== 从后端加载模板 ==========
+    async function loadTemplatesFromServer() {
+        try {
+            const res = await fetch('/api/templates');
+            const templates = await res.json();
+
+            pdfTemplates = {};
+            pdfTemplatesPrelim = {};
+            pdfTemplatesFinal = {};
+
+            function base64ToBlob(base64, mimeType) {
+                const byteCharacters = atob(base64);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                return new Blob([byteArray], { type: mimeType });
+            }
+
+            for (const [region, data] of Object.entries(templates.participation)) {
+                const blob = base64ToBlob(data.pdf_data, 'application/pdf');
+                pdfTemplates[region] = { url: URL.createObjectURL(blob), name: data.filename };
+            }
+            for (const [region, data] of Object.entries(templates.preliminary)) {
+                const blob = base64ToBlob(data.pdf_data, 'application/pdf');
+                pdfTemplatesPrelim[region] = { url: URL.createObjectURL(blob), name: data.filename };
+            }
+            for (const [region, data] of Object.entries(templates.final)) {
+                const blob = base64ToBlob(data.pdf_data, 'application/pdf');
+                pdfTemplatesFinal[region] = { url: URL.createObjectURL(blob), name: data.filename };
+            }
+        } catch (err) {
+            console.error('加载模板失败', err);
+        }
+    }
+
+    // ========== 查询功能 ==========
+    async function performQuery() {
+        const name = document.getElementById('fullname').value;
+        const region = document.getElementById('region').value;
+        const phone = document.getElementById('phone').value;
+        const org = document.getElementById('organization').value;
+
+        if (!name || !region || !phone || !org) {
+            showError("请完整填写姓名、赛区、手机号和所在单位四项信息", true);
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/participants/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: name,
+                    region: region,
+                    phone: phone,
+                    organization: org
+                })
+            });
+            const data = await res.json();
+
+            if (data.found) {
+                showError("", false);
+                await generateCertificate(data.participant);
+            } else {
+                showError(`未查找到您的信息，请核对`, true);
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><i class="fas fa-search"></i><p>未查找到您的信息</p><p style="font-size:0.8rem;">请检查输入是否正确</p></div>`;
+            }
+        } catch (err) {
+            showError("查询失败：" + err.message, true);
+        }
+    }
+
+    // ========== PDF 渲染函数 ==========
+    function formatNameWithSpaces(name) {
+        if (!name) return "";
+        const trimmed = name.trim();
+        let namePart = trimmed.length === 2 ? trimmed[0] + "　" + trimmed[1] : trimmed;
+        return "　" + namePart + "　";
+    }
+
+    async function replaceNameOnCanvas(canvas, name) {
+        return new Promise((resolve) => {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width, height = canvas.height;
+            const imgData = ctx.getImageData(0, 0, width, height);
+            const pixels = imgData.data;
+            let underlineY = -1, startX = -1, endX = -1;
+
+            for (let y = Math.floor(height * 0.3); y < Math.floor(height * 0.8); y++) {
+                let maxLen = 0, lineStart = -1, lineEnd = -1, curLen = 0, curStart = -1;
+                for (let x = 0; x < width; x++) {
+                    const idx = (y * width + x) * 4;
+                    const isDark = pixels[idx] < 80 && pixels[idx+1] < 80 && pixels[idx+2] < 80;
+                    if (isDark) {
+                        if (curStart === -1) curStart = x;
+                        curLen++;
+                    } else {
+                        if (curLen > 30 && curLen > maxLen) {
+                            maxLen = curLen;
+                            lineStart = curStart;
+                            lineEnd = x - 1;
+                        }
+                        curLen = 0;
+                        curStart = -1;
+                    }
+                }
+                if (curLen > 30 && curLen > maxLen) {
+                    maxLen = curLen;
+                    lineStart = curStart;
+                    lineEnd = width - 1;
+                }
+                if (maxLen > 80) {
+                    underlineY = y;
+                    startX = lineStart;
+                    endX = lineEnd;
+                    break;
+                }
+            }
+            if (underlineY === -1) {
+                underlineY = Math.floor(height * 0.6);
+                startX = Math.floor(width * 0.35);
+                endX = Math.floor(width * 0.65);
+            }
+
+            const fixedLeft = startX;
+            ctx.save();
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(fixedLeft - 20, underlineY - 95, (endX - startX) + 300, 140);
+            const nameY = underlineY - 32;
+            let fontSize = Math.floor(width / 65);
+            fontSize = Math.min(fontSize, 80);
+            fontSize = Math.max(fontSize, 80);
+            ctx.font = `${fontSize}px "华文行楷", "STXingkai", "KaiTi", cursive`;
+            ctx.fillStyle = "#000000";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            const formatted = formatNameWithSpaces(name);
+            ctx.fillText(formatted, fixedLeft, nameY);
+            const textWidth = ctx.measureText(formatted).width;
+            const underlineYPos = nameY + fontSize * 0.48;
+            ctx.beginPath();
+            ctx.lineWidth = Math.max(fontSize * 0.07, 3);
+            ctx.strokeStyle = "#000000";
+            ctx.moveTo(fixedLeft - 3, underlineYPos);
+            ctx.lineTo(fixedLeft + textWidth + 8, underlineYPos);
+            ctx.stroke();
+            ctx.restore();
+            resolve(canvas);
+        });
+    }
+
+    async function renderPdfWithNameReplacement(pdfData, name) {
+        const loadingTask = pdfjsLib.getDocument(pdfData.url);
+        const pdf = await loadingTask.promise;
+        const page = await pdf.getPage(1);
+        const scale = 3.0;
+        const viewport = page.getViewport({ scale: scale });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+        return await replaceNameOnCanvas(canvas, name);
+    }
+
+    async function generateCertificate(participant) {
+        if (!participant) return false;
+        const region = participant.赛区;
+        let pdfData = null;
+        if (currentCertType === "participation") pdfData = pdfTemplates[region];
+        else if (currentCertType === "preliminary") pdfData = pdfTemplatesPrelim[region];
+        else pdfData = pdfTemplatesFinal[region];
+
+        if (!pdfData) {
+            document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} 的模板</p></div>`;
+            return false;
+        }
+
+        document.getElementById('certificateRenderArea').innerHTML = `<div class="loading"><i class="fas fa-spinner fa-pulse fa-2x"></i><p>正在生成证书...</p></div>`;
+        try {
+            const canvas = await renderPdfWithNameReplacement(pdfData, participant.姓名);
+            currentResultCanvas = canvas;
+            const imageUrl = canvas.toDataURL('image/png');
+            const certName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖' : '决赛获奖');
+            document.getElementById('certificateRenderArea').innerHTML = `
+                <div style="display:flex;flex-direction:column;align-items:center;">
+                    <div class="pdf-container"><img src="${imageUrl}" class="result-canvas"></div>
+                    <button id="downloadBtn" class="btn-download"><i class="fas fa-download"></i> 下载PNG证书</button>
+                </div>`;
+            document.getElementById('downloadBtn').onclick = () => {
+                const link = document.createElement('a');
+                link.download = `法律英语大赛_${certName}_${participant.姓名}.png`;
+                link.href = currentResultCanvas.toDataURL('image/png');
+                link.click();
+            };
+            return true;
+        } catch (err) {
+            document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>生成失败: ${err.message}</p></div>`;
+            return false;
+        }
+    }
+
+    function showError(msg, show) {
+        const div = document.getElementById('errorMsg');
+        if (show) { div.style.display = 'block'; div.querySelector('span').innerText = msg; }
+        else div.style.display = 'none';
+    }
+
+    function setCertType(type) {
+        currentCertType = type;
+        document.getElementById('btnParticipation').classList.remove('active');
+        document.getElementById('btnPreliminary').classList.remove('active');
+        document.getElementById('btnFinal').classList.remove('active');
+        if (type === 'participation') document.getElementById('btnParticipation').classList.add('active');
+        else if (type === 'preliminary') document.getElementById('btnPreliminary').classList.add('active');
+        else document.getElementById('btnFinal').classList.add('active');
+        document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>请查询${type === 'participation' ? '参赛证明' : (type === 'preliminary' ? '预赛获奖证书' : '决赛获奖证书')}</p></div>`;
+    }
+
+    // ========== 绑定事件 ==========
+    document.getElementById('searchBtn').addEventListener('click', performQuery);
+    document.getElementById('btnParticipation').addEventListener('click', () => setCertType('participation'));
+    document.getElementById('btnPreliminary').addEventListener('click', () => setCertType('preliminary'));
+    document.getElementById('btnFinal').addEventListener('click', () => setCertType('final'));
+
+    ['fullname', 'region', 'phone', 'organization'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('keypress', e => { if(e.key === 'Enter') performQuery(); });
+    });
+
+    // 启动时加载模板
+    loadTemplatesFromServer();
+</script>
+</body>
+</html>
