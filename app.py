@@ -3,7 +3,7 @@ from flask_cors import CORS
 import sqlite3
 import base64
 from datetime import datetime
-import pandas as pd  # 新增：用于读取 Excel
+from openpyxl import load_workbook
 
 app = Flask(__name__, static_url_path='', static_folder='.')
 CORS(app)
@@ -231,27 +231,43 @@ def clear_templates():
 
 # ==================== 新增：从服务器读取 Excel 接口 ====================
 
+from openpyxl import load_workbook  # 在文件顶部添加这行
+
+
 @app.route('/api/load-excel', methods=['GET'])
 def load_excel():
-    """从服务器读取 Excel 文件"""
+    """从服务器读取 Excel 文件（使用 openpyxl，更轻量）"""
     try:
-        # 读取项目文件夹中的 Excel 文件
-        df = pd.read_excel('法律英语大赛网站测试.xlsx')
+        # 使用 openpyxl 读取 Excel
+        wb = load_workbook('法律英语大赛网站测试.xlsx')
+        ws = wb.active
 
-        # 转换成 JSON 格式
+        # 获取表头（第一行）
+        headers = []
+        for cell in ws[1]:
+            headers.append(cell.value)
+
+        # 找到各列的索引
+        name_idx = headers.index('姓名') if '姓名' in headers else 0
+        region_idx = headers.index('赛区') if '赛区' in headers else 1
+        phone_idx = headers.index('手机号') if '手机号' in headers else 2
+        org_idx = headers.index('所在单位') if '所在单位' in headers else 3
+
+        # 读取数据（从第二行开始）
         participants = []
-        for _, row in df.iterrows():
-            participants.append({
-                '姓名': str(row.get('姓名', '')),
-                '赛区': str(row.get('赛区', '')),
-                '手机号': str(row.get('手机号', '')),
-                '所在单位': str(row.get('所在单位', ''))
-            })
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if row[name_idx]:  # 如果姓名不为空
+                participants.append({
+                    '姓名': str(row[name_idx]) if row[name_idx] else '',
+                    '赛区': str(row[region_idx]) if row[region_idx] else '',
+                    '手机号': str(row[phone_idx]) if row[phone_idx] else '',
+                    '所在单位': str(row[org_idx]) if row[org_idx] else ''
+                })
 
+        wb.close()
         return jsonify({'success': True, 'data': participants, 'count': len(participants)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
-
 
 # ==================== 页面路由 ====================
 
