@@ -3,6 +3,7 @@ from flask_cors import CORS
 import sqlite3
 import base64
 from datetime import datetime
+import pandas as pd  # 新增：用于读取 Excel
 
 app = Flask(__name__, static_url_path='', static_folder='.')
 CORS(app)
@@ -228,12 +229,37 @@ def clear_templates():
     return jsonify({'success': True})
 
 
+# ==================== 新增：从服务器读取 Excel 接口 ====================
+
+@app.route('/api/load-excel', methods=['GET'])
+def load_excel():
+    """从服务器读取 Excel 文件"""
+    try:
+        # 读取项目文件夹中的 Excel 文件
+        df = pd.read_excel('法律英语大赛网站测试.xlsx')
+
+        # 转换成 JSON 格式
+        participants = []
+        for _, row in df.iterrows():
+            participants.append({
+                '姓名': str(row.get('姓名', '')),
+                '赛区': str(row.get('赛区', '')),
+                '手机号': str(row.get('手机号', '')),
+                '所在单位': str(row.get('所在单位', ''))
+            })
+
+        return jsonify({'success': True, 'data': participants, 'count': len(participants)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
 # ==================== 页面路由 ====================
 
 @app.route('/')
 def index():
     """查询页面（分享给用户）"""
     return send_from_directory('.', 'query.html')
+
 
 @app.route('/admin')
 def admin():
@@ -249,5 +275,6 @@ def serve_static(path):
 
 if __name__ == '__main__':
     import os
+
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)

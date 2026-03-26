@@ -168,6 +168,19 @@
             cursor: pointer;
             font-size: 0.8rem;
         }
+        .server-btn {
+            background: #17a2b8;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 2rem;
+            cursor: pointer;
+            font-size: 0.8rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .server-btn:hover { background: #138496; }
         .title-section { text-align: center; margin: 0.5rem 0 2rem 0; }
         .main-title {
             font-size: 2.5rem;
@@ -357,6 +370,7 @@
         <div class="upload-area">
             <label class="upload-label" for="fileInput"><i class="fas fa-file-excel"></i> 导入 Excel 数据</label>
             <input type="file" id="fileInput" accept=".xlsx, .xls, .csv">
+            <button class="server-btn" id="loadServerExcelBtn"><i class="fas fa-cloud-upload-alt"></i> 从服务器加载数据</button>
             <div class="data-status" id="dataStatus"><i class="fas fa-database"></i> 未加载数据</div>
             <div class="template-status" id="templateStatus"><i class="fas fa-file-pdf"></i> 暂无模板</div>
             <button class="sample-btn" id="loadSampleBtn"><i class="fas fa-chalkboard-user"></i> 加载演示数据</button>
@@ -579,6 +593,31 @@
             }
         } catch (err) {
             alert('清空失败：' + err.message);
+        }
+    }
+
+    // ========== 从服务器加载 Excel 数据 ==========
+    async function loadExcelFromServer() {
+        const btn = document.getElementById('loadServerExcelBtn');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> 加载中...';
+        btn.disabled = true;
+
+        try {
+            const res = await fetch('/api/load-excel');
+            const result = await res.json();
+
+            if (result.success) {
+                await uploadParticipantsToServer(result.data);
+                alert(`✅ 成功从服务器加载 ${result.count} 条数据！`);
+            } else {
+                alert('❌ 加载失败：' + result.error + '\n\n请确保 Excel 文件已上传到服务器');
+            }
+        } catch (err) {
+            alert('❌ 加载失败：' + err.message);
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
         }
     }
 
@@ -904,6 +943,7 @@
 
     // ========== 绑定事件 ==========
     document.getElementById('fileInput').addEventListener('change', e => { if(e.target.files.length) handleExcelFile(e.target.files[0]); });
+    document.getElementById('loadServerExcelBtn').addEventListener('click', loadExcelFromServer);
     document.getElementById('loadSampleBtn').addEventListener('click', loadDemoData);
     document.getElementById('searchBtn').addEventListener('click', performQuery);
     document.getElementById('btnParticipation').addEventListener('click', () => setCertType('participation'));
