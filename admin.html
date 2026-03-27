@@ -956,9 +956,15 @@
         if (el) el.addEventListener('keypress', e => { if(e.key === 'Enter') performQuery(); });
     });
 
-    // 启动时加载数据
-    loadParticipantsFromServer();
+        // 启动时自动从服务器加载数据
+    async function initializeData() {
+        // 自动从服务器加载最新数据
+        await loadExcelFromServer();
+    }
+
+    initializeData();
     loadTemplatesFromServer();
+</script>
 </script>
 </body>
 </html>
