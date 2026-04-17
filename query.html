@@ -291,83 +291,89 @@
         });
     }
 
-    // 将 base64 转为 Blob URL
-    function base64ToBlobUrl(base64, mimeType) {
-        const byteCharacters = atob(base64);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
+    // ==================== 从 templates_pdf 文件夹加载模板 ====================
+    async function loadTemplatesFromFolder() {
+        console.log("开始从 templates_pdf 文件夹加载模板...");
+
+        // 清空旧模板及 Blob URLs
+        const clearTemplateUrls = (templateObj) => {
+            for (let key in templateObj) {
+                if (templateObj[key]?.url) URL.revokeObjectURL(templateObj[key].url);
+            }
+        };
+        clearTemplateUrls(pdfTemplates);
+        clearTemplateUrls(pdfTemplatesPrelim);
+        clearTemplateUrls(pdfTemplatesFinal);
+
+        pdfTemplates = {};
+        pdfTemplatesPrelim = {};
+        pdfTemplatesFinal = {};
+
+        // 加载参赛证明模板（文件名格式：{赛区}参赛证明.pdf）
+        for (const region of validRegions) {
+            const fileName = `${region}参赛证明.pdf`;
+            const fileUrl = `/templates_pdf/${encodeURIComponent(fileName)}`;
+
+            try {
+                const response = await fetch(fileUrl);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    pdfTemplates[region] = { url: blobUrl, name: fileName };
+                    console.log(`✅ 加载参赛证明模板：${region}`);
+                } else {
+                    console.warn(`⚠️ 未找到参赛证明模板：${fileName}`);
+                }
+            } catch (err) {
+                console.error(`加载失败：${fileName}`, err);
+            }
         }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: mimeType });
-        return URL.createObjectURL(blob);
-    }
 
-    // ==================== 从后端加载模板 ====================
-    async function loadTemplatesFromServer() {
-        try {
-            const res = await fetch('/api/templates');
-            if (!res.ok) {
-                console.warn('模板接口异常，状态码:', res.status);
-                return;
-            }
-            const templates = await res.json();
+        // 加载预赛获奖模板（文件名格式：{赛区}预赛获奖证书.pdf）
+        for (const region of validRegions) {
+            const fileName = `${region}预赛获奖证书.pdf`;
+            const fileUrl = `/templates_pdf/${encodeURIComponent(fileName)}`;
 
-            // 清空旧模板及 Blob URLs (避免内存泄露)
-            const clearTemplateUrls = (templateObj) => {
-                for (let key in templateObj) {
-                    if (templateObj[key]?.url) URL.revokeObjectURL(templateObj[key].url);
+            try {
+                const response = await fetch(fileUrl);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    pdfTemplatesPrelim[region] = { url: blobUrl, name: fileName };
+                    console.log(`✅ 加载预赛获奖模板：${region}`);
+                } else {
+                    console.warn(`⚠️ 未找到预赛获奖模板：${fileName}`);
                 }
-            };
-            clearTemplateUrls(pdfTemplates);
-            clearTemplateUrls(pdfTemplatesPrelim);
-            clearTemplateUrls(pdfTemplatesFinal);
+            } catch (err) {
+                console.error(`加载失败：${fileName}`, err);
+            }
+        }
 
-            pdfTemplates = {};
-            pdfTemplatesPrelim = {};
-            pdfTemplatesFinal = {};
+        // 加载决赛获奖模板（文件名格式：{赛区}决赛获奖证书.pdf）
+        for (const region of validRegions) {
+            const fileName = `${region}决赛获奖证书.pdf`;
+            const fileUrl = `/templates_pdf/${encodeURIComponent(fileName)}`;
 
-            // 加载参赛证明模板
-            if (templates.participation) {
-                for (const [region, data] of Object.entries(templates.participation)) {
-                    if (data && data.pdf_data) {
-                        pdfTemplates[region] = {
-                            url: base64ToBlobUrl(data.pdf_data, 'application/pdf'),
-                            name: data.filename || `${region}参赛证明.pdf`
-                        };
-                    }
+            try {
+                const response = await fetch(fileUrl);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    pdfTemplatesFinal[region] = { url: blobUrl, name: fileName };
+                    console.log(`✅ 加载决赛获奖模板：${region}`);
+                } else {
+                    console.warn(`⚠️ 未找到决赛获奖模板：${fileName}`);
                 }
+            } catch (err) {
+                console.error(`加载失败：${fileName}`, err);
             }
-            // 加载预赛获奖模板
-            if (templates.preliminary) {
-                for (const [region, data] of Object.entries(templates.preliminary)) {
-                    if (data && data.pdf_data) {
-                        pdfTemplatesPrelim[region] = {
-                            url: base64ToBlobUrl(data.pdf_data, 'application/pdf'),
-                            name: data.filename || `${region}预赛获奖证书.pdf`
-                        };
-                    }
-                }
-            }
-            // 加载决赛获奖模板
-            if (templates.final) {
-                for (const [region, data] of Object.entries(templates.final)) {
-                    if (data && data.pdf_data) {
-                        pdfTemplatesFinal[region] = {
-                            url: base64ToBlobUrl(data.pdf_data, 'application/pdf'),
-                            name: data.filename || `${region}决赛获奖证书.pdf`
-                        };
-                    }
-                }
-            }
+        }
 
-            const totalCount = Object.keys(pdfTemplates).length + Object.keys(pdfTemplatesPrelim).length + Object.keys(pdfTemplatesFinal).length;
-            console.log(`✅ 已从服务器加载模板: 参赛证明 ${Object.keys(pdfTemplates).length}, 预赛 ${Object.keys(pdfTemplatesPrelim).length}, 决赛 ${Object.keys(pdfTemplatesFinal).length}`);
-            if (totalCount === 0) {
-                console.warn('⚠️ 当前没有任何模板，请通过管理员后台上传');
-            }
-        } catch (err) {
-            console.error('加载模板失败:', err);
+        const totalCount = Object.keys(pdfTemplates).length + Object.keys(pdfTemplatesPrelim).length + Object.keys(pdfTemplatesFinal).length;
+        console.log(`✅ 模板加载完成: 参赛证明 ${Object.keys(pdfTemplates).length}, 预赛 ${Object.keys(pdfTemplatesPrelim).length}, 决赛 ${Object.keys(pdfTemplatesFinal).length}`);
+
+        if (totalCount === 0) {
+            console.warn('⚠️ 当前 templates_pdf 文件夹中没有找到任何模板文件');
         }
     }
 
@@ -416,7 +422,7 @@
         }
     }
 
-    // ==================== PDF 姓名 + 证书编号绘制（与admin端逻辑对齐） ====================
+    // ==================== PDF 姓名 + 证书编号绘制 ====================
     function formatNameWithSpaces(name) {
         if (!name) return "";
         const trimmed = name.trim();
@@ -425,7 +431,7 @@
         return "　" + namePart + "　";
     }
 
-    // 在 canvas 上替换姓名和绘制证书编号（基于原模板下划线区域）
+    // 在 canvas 上替换姓名和绘制证书编号
     async function replaceNameAndCertificateOnCanvas(canvas, name, certificateNumber) {
         return new Promise((resolve) => {
             const ctx = canvas.getContext('2d');
@@ -434,7 +440,7 @@
             const pixels = imgData.data;
             let underlineY = -1, startX = -1, endX = -1;
 
-            // 扫描寻找最明显的下划线区域（与 admin 端逻辑一致）
+            // 扫描寻找最明显的下划线区域
             for (let y = Math.floor(height * 0.3); y < Math.floor(height * 0.8); y++) {
                 let maxLen = 0, lineStart = -1, lineEnd = -1, curLen = 0, curStart = -1;
                 for (let x = 0; x < width; x++) {
@@ -465,6 +471,7 @@
                     break;
                 }
             }
+
             // 未检测到下划线则使用默认位置
             if (underlineY === -1) {
                 underlineY = Math.floor(height * 0.6);
@@ -503,43 +510,32 @@
             ctx.lineTo(fixedLeft + nameWidth + 8, underlineYPos);
             ctx.stroke();
 
-            // ========== 绘制证书编号（紧邻姓名右侧，与 admin 生成风格一致） ==========
+            // ========== 绘制证书编号（在姓名下方或右侧） ==========
             if (certificateNumber && certificateNumber !== "") {
-                let certFontSize = Math.floor(fontSize * 0.55);
-                certFontSize = Math.min(certFontSize, 44);
-                certFontSize = Math.max(certFontSize, 22);
+                let certFontSize = Math.floor(fontSize * 0.45);
+                certFontSize = Math.min(certFontSize, 36);
+                certFontSize = Math.max(certFontSize, 18);
 
                 ctx.font = `${certFontSize}px "Times New Roman", serif`;
                 ctx.fillStyle = "#000000";
                 ctx.textAlign = "left";
                 ctx.textBaseline = "middle";
 
-                // 分离 NO. 和数字部分，让 NO. 加粗更醒目
-                const match = certificateNumber.match(/^(NO\.)(.*)$/i);
-                let certText = certificateNumber;
-                let noPart = "", numPart = "";
-                if (match) {
-                    noPart = match[1];
-                    numPart = match[2];
-                }
+                // 证书编号放在姓名下方（更符合传统证书布局）
+                const certX = fixedLeft;
+                const certY = nameY + fontSize * 0.7;
 
-                const certX = fixedLeft + nameWidth + 40;
-                const certY = nameY;
+                // 先绘制 "证书编号：" 标签
+                ctx.font = `${certFontSize}px "SimHei", "Microsoft YaHei", sans-serif`;
+                ctx.fillStyle = "#333333";
+                ctx.fillText("证书编号：", certX, certY);
 
-                if (noPart && numPart) {
-                    ctx.font = `bold ${certFontSize}px "Times New Roman", serif`;
-                    ctx.fillStyle = "#000000";
-                    const noWidth = ctx.measureText(noPart).width;
-                    ctx.fillText(noPart, certX, certY);
+                const labelWidth = ctx.measureText("证书编号：").width;
 
-                    ctx.font = `${certFontSize}px "Times New Roman", serif`;
-                    ctx.fillStyle = "#000000";
-                    ctx.fillText(numPart, certX + noWidth, certY);
-                } else {
-                    ctx.font = `bold ${certFontSize}px "Times New Roman", serif`;
-                    ctx.fillStyle = "#000000";
-                    ctx.fillText(certText, certX, certY);
-                }
+                // 再绘制证书编号数字（加粗）
+                ctx.font = `bold ${certFontSize}px "Times New Roman", serif`;
+                ctx.fillStyle = "#8b5a2b";
+                ctx.fillText(certificateNumber, certX + labelWidth, certY);
             }
 
             ctx.restore();
@@ -578,7 +574,7 @@
 
         if (!pdfData) {
             const certTypeName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖证书' : '决赛获奖证书');
-            document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} 的${certTypeName}模板</p><p style="font-size:0.8rem;">请联系管理员上传对应模板</p></div>`;
+            document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} 的${certTypeName}模板</p><p style="font-size:0.8rem;">请联系管理员上传对应模板到 templates_pdf 文件夹</p></div>`;
             return false;
         }
 
@@ -656,7 +652,6 @@
 
         // 切换证书类型时清空显示区域，提示重新查询
         document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>请查询${type === 'participation' ? '参赛证明' : (type === 'preliminary' ? '预赛获奖证书' : '决赛获奖证书')}</p></div>`;
-        // 同时清除旧的错误提示
         showError("", false);
     }
 
@@ -672,8 +667,8 @@
         if (el) el.addEventListener('keypress', e => { if(e.key === 'Enter') performQuery(); });
     });
 
-    // 启动时加载模板
-    loadTemplatesFromServer();
+    // 启动时从 templates_pdf 文件夹加载模板
+    loadTemplatesFromFolder();
 </script>
 </body>
 </html>
