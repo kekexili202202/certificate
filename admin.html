@@ -331,6 +331,44 @@
         .empty-state { padding: 3rem; text-align: center; color: #a28e6f; }
         .loading { text-align: center; padding: 2rem; color: #2c5a6e; }
         .loading i { font-size: 2rem; margin-bottom: 1rem; }
+
+        /* 证书编号卡片样式 */
+        .participant-info-card {
+            background: #faf6ed;
+            border-radius: 1rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            width: 100%;
+            border: 1px solid #eeddbb;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .participant-name {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #2c553d;
+        }
+        .cert-number {
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 0.9rem;
+            color: #8b5a2b;
+            background: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 1.5rem;
+            border: 1px solid #eddabc;
+            letter-spacing: 0.5px;
+        }
+        .participant-details {
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+            color: #8b6b42;
+        }
+
         @media (max-width: 780px) {
             .certificate-preview { padding: 1rem; }
             .main-title { font-size: 1.8rem; }
@@ -435,6 +473,17 @@
     const ADMIN_KEY = "admin123456";
     const validRegions = ["华北及东北赛区", "西北赛区", "西南赛区", "华东赛区", "华南赛区"];
 
+    // HTML 转义函数
+    function escapeHtml(str) {
+        if (!str) return "";
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+
     // ========== 直接从 GitHub 仓库加载模板（永久方案） ==========
     async function loadTemplatesFromGitHub() {
         console.log("开始从 GitHub 加载模板...");
@@ -445,7 +494,6 @@
 
         for (const region of regions) {
             const fileName = `${region}参赛证明.pdf`;
-            // 直接从你的 GitHub 仓库获取文件
             const fileUrl = `/templates_pdf/${encodeURIComponent(fileName)}`;
 
             try {
@@ -887,14 +935,36 @@
             currentResultCanvas = canvas;
             const imageUrl = canvas.toDataURL('image/png');
             const certName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖' : '决赛获奖');
+
+            // 获取证书编号
+            const certificateNumber = participant.证书编号 || "生成中";
+
+            // 构建带证书编号显示的页面
             document.getElementById('certificateRenderArea').innerHTML = `
-                <div style="display:flex;flex-direction:column;align-items:center;">
-                    <div class="pdf-container"><img src="${imageUrl}" class="result-canvas"></div>
-                    <button id="downloadBtn" class="btn-download"><i class="fas fa-download"></i> 下载PNG证书</button>
+                <div style="display:flex;flex-direction:column;align-items:center;width:100%;">
+                    <!-- 选手信息卡片，包含姓名和证书编号 -->
+                    <div class="participant-info-card">
+                        <div class="info-row">
+                            <span class="participant-name"><i class="fas fa-user"></i> ${escapeHtml(participant.姓名)}</span>
+                            <span class="cert-number"><i class="fas fa-certificate"></i> 证书编号：${escapeHtml(certificateNumber)}</span>
+                        </div>
+                        <div class="participant-details">
+                            <span><i class="fas fa-map-marker-alt"></i> ${escapeHtml(participant.赛区)}</span>
+                            <span style="margin-left:1rem;"><i class="fas fa-building"></i> ${escapeHtml(participant.所在单位)}</span>
+                        </div>
+                    </div>
+                    <!-- PDF证书图片 -->
+                    <div class="pdf-container">
+                        <img src="${imageUrl}" class="result-canvas">
+                    </div>
+                    <button id="downloadBtn" class="btn-download">
+                        <i class="fas fa-download"></i> 下载PNG证书
+                    </button>
                 </div>`;
+
             document.getElementById('downloadBtn').onclick = () => {
                 const link = document.createElement('a');
-                link.download = `法律英语大赛_${certName}_${participant.姓名}.png`;
+                link.download = `法律英语大赛_${certName}_${participant.姓名}_${certificateNumber}.png`;
                 link.href = currentResultCanvas.toDataURL('image/png');
                 link.click();
             };
@@ -952,9 +1022,7 @@
     // ========== 启动初始化 ==========
     async function initializeData() {
         console.log("页面启动，开始初始化...");
-        // 1. 先从 GitHub 加载模板
         await loadTemplatesFromGitHub();
-        // 2. 再从服务器加载选手数据
         await loadExcelFromServer();
     }
 

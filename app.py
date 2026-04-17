@@ -11,20 +11,34 @@ CORS(app)
 # 管理员密钥（可以改成你自己的密码）
 ADMIN_KEY = "admin123456"
 
+# 赛区编号映射
+REGION_CODE = {
+    "华北及东北赛区": "01",
+    "华南赛区": "02",
+    "华东赛区": "03",
+    "西南赛区": "04",
+    "西北赛区": "05"
+}
+
+# 反向映射（用于从编号找赛区）
+CODE_TO_REGION = {v: k for k, v in REGION_CODE.items()}
+
 
 # 初始化数据库
 def init_db():
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
 
-    # 选手数据表
+    # 选手数据表（增加 region_code 和 serial_number 字段）
     c.execute('''
         CREATE TABLE IF NOT EXISTS participants (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             region TEXT NOT NULL,
+            region_code TEXT NOT NULL,
             phone TEXT NOT NULL,
             organization TEXT NOT NULL,
+            serial_number INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -49,6 +63,21 @@ def init_db():
 init_db()
 
 
+def get_next_serial_number(region_code):
+    """获取某个赛区的下一个序号"""
+    conn = sqlite3.connect('data.db')
+    c = conn.cursor()
+    c.execute('SELECT MAX(serial_number) FROM participants WHERE region_code = ?', (region_code,))
+    result = c.fetchone()[0]
+    conn.close()
+    return (result or 0) + 1
+
+
+def generate_certificate_number(region_code, serial_number, phone_last4):
+    """生成证书编号 NO.NLEC2026 + 赛区编号 + 序号(4位) + 手机号后4位"""
+    return f"NO.NLEC2026{region_code}{str(serial_number).zfill(4)}{phone_last4}"
+
+
 # ==================== 选手数据接口 ====================
 
 @app.route('/api/participants', methods=['GET'])
@@ -56,18 +85,21 @@ def get_participants():
     """获取所有选手数据"""
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-    c.execute('SELECT id, name, region, phone, organization FROM participants ORDER BY id')
+    c.execute('SELECT id, name, region, region_code, phone, organization, serial_number FROM participants ORDER BY id')
     rows = c.fetchall()
     conn.close()
 
     participants = []
     for row in rows:
+        phone_last4 = row[4][-4:] if len(row[4]) >= 4 else row[4]
+        cert_number = generate_certificate_number(row[3], row[6], phone_last4)
         participants.append({
             'id': row[0],
             '姓名': row[1],
             '赛区': row[2],
-            '手机号': row[3],
-            '所在单位': row[4]
+            '手机号': row[4],
+            '所在单位': row[5],
+            '证书编号': cert_number
         })
     return jsonify(participants)
 
@@ -88,12 +120,17 @@ def upload_participants():
     # 清空原有数据
     c.execute('DELETE FROM participants')
 
-    # 插入新数据
+    # 插入新数据，自动生成序号
     for p in participants:
+        region = p.get('赛区', '')
+        region_code = REGION_CODE.get(region, '00')
+        phone = p.get('手机号', '')
+        serial_number = get_next_serial_number(region_code)
+
         c.execute('''
-            INSERT INTO participants (name, region, phone, organization)
-            VALUES (?, ?, ?, ?)
-        ''', (p.get('姓名', ''), p.get('赛区', ''), p.get('手机号', ''), p.get('所在单位', '')))
+            INSERT INTO participants (name, region, region_code, phone, organization, serial_number)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (p.get('姓名', ''), region, region_code, phone, p.get('所在单位', ''), serial_number))
 
     conn.commit()
     conn.close()
@@ -103,7 +140,7 @@ def upload_participants():
 
 @app.route('/api/participants/query', methods=['POST'])
 def query_participant():
-    """查询选手信息"""
+    """查询选手信息（返回包含证书编号）"""
     data = request.json
     name = data.get('name', '').strip()
     region = data.get('region', '').strip()
@@ -113,7 +150,7 @@ def query_participant():
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
     c.execute('''
-        SELECT name, region, phone, organization FROM participants
+        SELECT name, region, region_code, phone, organization, serial_number FROM participants
         WHERE name = ? AND region = ? AND phone = ? AND organization = ?
     ''', (name, region, phone, organization))
 
@@ -121,13 +158,16 @@ def query_participant():
     conn.close()
 
     if row:
+        phone_last4 = row[3][-4:] if len(row[3]) >= 4 else row[3]
+        cert_number = generate_certificate_number(row[2], row[5], phone_last4)
         return jsonify({
             'found': True,
             'participant': {
                 '姓名': row[0],
                 '赛区': row[1],
-                '手机号': row[2],
-                '所在单位': row[3]
+                '手机号': row[3],
+                '所在单位': row[4],
+                '证书编号': cert_number
             }
         })
     else:
@@ -229,16 +269,12 @@ def clear_templates():
     return jsonify({'success': True})
 
 
-# ==================== 新增：从服务器读取 Excel 接口 ====================
-
-from openpyxl import load_workbook  # 在文件顶部添加这行
-
+# ==================== 从服务器读取 Excel 接口 ====================
 
 @app.route('/api/load-excel', methods=['GET'])
 def load_excel():
-    """从服务器读取 Excel 文件（使用 openpyxl，更轻量）"""
+    """从服务器读取 Excel 文件"""
     try:
-        # 使用 openpyxl 读取 Excel
         wb = load_workbook('法律英语大赛网站测试.xlsx')
         ws = wb.active
 
@@ -247,11 +283,12 @@ def load_excel():
         for cell in ws[1]:
             headers.append(cell.value)
 
-        # 找到各列的索引
-        name_idx = headers.index('姓名') if '姓名' in headers else 0
-        region_idx = headers.index('赛区') if '赛区' in headers else 1
-        phone_idx = headers.index('手机号') if '手机号' in headers else 2
-        org_idx = headers.index('所在单位') if '所在单位' in headers else 3
+        # 找到各列的索引（第一列是赛区序号，第二列是姓名，第三列是赛区，第四列是手机号，第五列是所在学校）
+        region_code_idx = headers.index('赛区序号') if '赛区序号' in headers else 0
+        name_idx = headers.index('姓名') if '姓名' in headers else 1
+        region_idx = headers.index('赛区') if '赛区' in headers else 2
+        phone_idx = headers.index('手机号') if '手机号' in headers else 3
+        org_idx = headers.index('所在学校') if '所在学校' in headers else 4
 
         # 读取数据（从第二行开始）
         participants = []
@@ -268,6 +305,7 @@ def load_excel():
         return jsonify({'success': True, 'data': participants, 'count': len(participants)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
 
 # ==================== 页面路由 ====================
 

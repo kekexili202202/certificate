@@ -151,8 +151,41 @@
             border-radius: 8px;
             overflow: hidden;
             max-width: 100%;
+            position: relative;
         }
         .result-canvas { display: block; max-width: 100%; height: auto; }
+
+        /* 证书编号显示样式 - 在姓名右边 */
+        .participant-info-card {
+            background: #faf6ed;
+            border-radius: 1rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            width: 100%;
+            border: 1px solid #eeddbb;
+        }
+        .participant-info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .participant-name-large {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #2c553d;
+        }
+        .cert-number-display {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #8b5a2b;
+            background: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 1.5rem;
+            border: 1px solid #eddabc;
+        }
+
         .btn-download {
             background: #2c5f2d;
             border: none;
@@ -169,6 +202,7 @@
         .empty-state { padding: 3rem; text-align: center; color: #a28e6f; }
         .loading { text-align: center; padding: 2rem; color: #2c5a6e; }
         .loading i { font-size: 2rem; margin-bottom: 1rem; }
+
         @media (max-width: 780px) {
             .certificate-preview { padding: 1rem; }
             .main-title { font-size: 1.8rem; }
@@ -232,6 +266,7 @@
     let pdfTemplatesFinal = {};
     let currentCertType = "participation";
     let currentResultCanvas = null;
+    let currentCertificateNumber = "";  // 存储当前查询到的证书编号
 
     const validRegions = ["华北及东北赛区", "西北赛区", "西南赛区", "华东赛区", "华南赛区"];
 
@@ -299,6 +334,7 @@
 
             if (data.found) {
                 showError("", false);
+                currentCertificateNumber = data.participant.证书编号 || "";  // 保存证书编号
                 await generateCertificate(data.participant);
             } else {
                 showError(`未查找到您的信息，请核对`, true);
@@ -401,6 +437,17 @@
         return await replaceNameOnCanvas(canvas, name);
     }
 
+    // HTML转义函数
+    function escapeHtml(str) {
+        if (!str) return "";
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+
     async function generateCertificate(participant) {
         if (!participant) return false;
         const region = participant.赛区;
@@ -420,14 +467,33 @@
             currentResultCanvas = canvas;
             const imageUrl = canvas.toDataURL('image/png');
             const certName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖' : '决赛获奖');
+
+            // 构建带证书编号显示的页面
             document.getElementById('certificateRenderArea').innerHTML = `
-                <div style="display:flex;flex-direction:column;align-items:center;">
-                    <div class="pdf-container"><img src="${imageUrl}" class="result-canvas"></div>
-                    <button id="downloadBtn" class="btn-download"><i class="fas fa-download"></i> 下载PNG证书</button>
+                <div style="display:flex;flex-direction:column;align-items:center;width:100%;">
+                    <!-- 选手信息卡片，包含姓名和证书编号 -->
+                    <div class="participant-info-card" style="width:100%;">
+                        <div class="participant-info-row">
+                            <span class="participant-name-large"><i class="fas fa-user"></i> ${escapeHtml(participant.姓名)}</span>
+                            <span class="cert-number-display"><i class="fas fa-certificate"></i> 证书编号：${escapeHtml(currentCertificateNumber)}</span>
+                        </div>
+                        <div style="margin-top:0.5rem; font-size:0.8rem; color:#8b6b42;">
+                            <span><i class="fas fa-map-marker-alt"></i> ${escapeHtml(participant.赛区)}</span>
+                            <span style="margin-left:1rem;"><i class="fas fa-building"></i> ${escapeHtml(participant.所在单位)}</span>
+                        </div>
+                    </div>
+                    <!-- PDF证书图片 -->
+                    <div class="pdf-container">
+                        <img src="${imageUrl}" class="result-canvas">
+                    </div>
+                    <button id="downloadBtn" class="btn-download">
+                        <i class="fas fa-download"></i> 下载PNG证书
+                    </button>
                 </div>`;
+
             document.getElementById('downloadBtn').onclick = () => {
                 const link = document.createElement('a');
-                link.download = `法律英语大赛_${certName}_${participant.姓名}.png`;
+                link.download = `法律英语大赛_${certName}_${participant.姓名}_${currentCertificateNumber}.png`;
                 link.href = currentResultCanvas.toDataURL('image/png');
                 link.click();
             };
