@@ -56,6 +56,7 @@
             color: #2c4c6e;
             border: 1px solid #e0e7ed;
             box-shadow: 0 5px 12px rgba(0,0,0,0.1);
+            transition: all 0.2s;
         }
         .cert-btn.active {
             background: linear-gradient(135deg, #2c5a6e, #8b3c3c);
@@ -101,6 +102,10 @@
             border: 1.5px solid #e2e8f0;
             font-size: 0.95rem;
             outline: none;
+            transition: border 0.2s;
+        }
+        .input-group input:focus {
+            border-color: #9b2e2e;
         }
         .btn-query {
             background: linear-gradient(95deg, #2c5a6e, #9b2e2e);
@@ -117,7 +122,9 @@
             align-items: center;
             justify-content: center;
             gap: 8px;
+            transition: opacity 0.2s;
         }
+        .btn-query:hover { opacity: 0.92; }
         .error-msg {
             background: #ffe8e6;
             color: #c2412c;
@@ -145,6 +152,41 @@
             flex-direction: column;
             align-items: center;
         }
+        .participant-info-card {
+            background: #faf6ed;
+            border-radius: 1rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            width: 100%;
+            border: 1px solid #eeddbb;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .participant-name {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #2c553d;
+        }
+        .cert-number {
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 0.9rem;
+            color: #8b5a2b;
+            background: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 1.5rem;
+            border: 1px solid #eddabc;
+            letter-spacing: 0.5px;
+        }
+        .participant-details {
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+            color: #8b6b42;
+        }
         .pdf-container {
             background: white;
             box-shadow: 0 8px 20px rgba(0,0,0,0.15);
@@ -165,7 +207,9 @@
             display: inline-flex;
             align-items: center;
             gap: 8px;
+            transition: background 0.2s;
         }
+        .btn-download:hover { background: #1f4520; }
         .empty-state { padding: 3rem; text-align: center; color: #a28e6f; }
         .loading { text-align: center; padding: 2rem; color: #2c5a6e; }
         .loading i { font-size: 2rem; margin-bottom: 1rem; }
@@ -227,60 +271,122 @@
 <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-    let pdfTemplates = {};
-    let pdfTemplatesPrelim = {};
-    let pdfTemplatesFinal = {};
+    // 模板存储：分别存储参赛证明、预赛、决赛
+    let pdfTemplates = {};        // 参赛证明模板 (region -> {url, name})
+    let pdfTemplatesPrelim = {};  // 预赛获奖模板
+    let pdfTemplatesFinal = {};    // 决赛获奖模板
     let currentCertType = "participation";
     let currentResultCanvas = null;
 
     const validRegions = ["华北及东北赛区", "西北赛区", "西南赛区", "华东赛区", "华南赛区"];
 
-    // ========== 从后端加载模板 ==========
+    // ==================== 辅助函数 ====================
+    function escapeHtml(str) {
+        if (!str) return "";
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+
+    // 将 base64 转为 Blob URL
+    function base64ToBlobUrl(base64, mimeType) {
+        const byteCharacters = atob(base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: mimeType });
+        return URL.createObjectURL(blob);
+    }
+
+    // ==================== 从后端加载模板 ====================
     async function loadTemplatesFromServer() {
         try {
             const res = await fetch('/api/templates');
+            if (!res.ok) {
+                console.warn('模板接口异常，状态码:', res.status);
+                return;
+            }
             const templates = await res.json();
+
+            // 清空旧模板及 Blob URLs (避免内存泄露)
+            const clearTemplateUrls = (templateObj) => {
+                for (let key in templateObj) {
+                    if (templateObj[key]?.url) URL.revokeObjectURL(templateObj[key].url);
+                }
+            };
+            clearTemplateUrls(pdfTemplates);
+            clearTemplateUrls(pdfTemplatesPrelim);
+            clearTemplateUrls(pdfTemplatesFinal);
 
             pdfTemplates = {};
             pdfTemplatesPrelim = {};
             pdfTemplatesFinal = {};
 
-            function base64ToBlob(base64, mimeType) {
-                const byteCharacters = atob(base64);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+            // 加载参赛证明模板
+            if (templates.participation) {
+                for (const [region, data] of Object.entries(templates.participation)) {
+                    if (data && data.pdf_data) {
+                        pdfTemplates[region] = {
+                            url: base64ToBlobUrl(data.pdf_data, 'application/pdf'),
+                            name: data.filename || `${region}参赛证明.pdf`
+                        };
+                    }
                 }
-                const byteArray = new Uint8Array(byteNumbers);
-                return new Blob([byteArray], { type: mimeType });
+            }
+            // 加载预赛获奖模板
+            if (templates.preliminary) {
+                for (const [region, data] of Object.entries(templates.preliminary)) {
+                    if (data && data.pdf_data) {
+                        pdfTemplatesPrelim[region] = {
+                            url: base64ToBlobUrl(data.pdf_data, 'application/pdf'),
+                            name: data.filename || `${region}预赛获奖证书.pdf`
+                        };
+                    }
+                }
+            }
+            // 加载决赛获奖模板
+            if (templates.final) {
+                for (const [region, data] of Object.entries(templates.final)) {
+                    if (data && data.pdf_data) {
+                        pdfTemplatesFinal[region] = {
+                            url: base64ToBlobUrl(data.pdf_data, 'application/pdf'),
+                            name: data.filename || `${region}决赛获奖证书.pdf`
+                        };
+                    }
+                }
             }
 
-            for (const [region, data] of Object.entries(templates.participation)) {
-                const blob = base64ToBlob(data.pdf_data, 'application/pdf');
-                pdfTemplates[region] = { url: URL.createObjectURL(blob), name: data.filename };
-            }
-            for (const [region, data] of Object.entries(templates.preliminary)) {
-                const blob = base64ToBlob(data.pdf_data, 'application/pdf');
-                pdfTemplatesPrelim[region] = { url: URL.createObjectURL(blob), name: data.filename };
-            }
-            for (const [region, data] of Object.entries(templates.final)) {
-                const blob = base64ToBlob(data.pdf_data, 'application/pdf');
-                pdfTemplatesFinal[region] = { url: URL.createObjectURL(blob), name: data.filename };
+            const totalCount = Object.keys(pdfTemplates).length + Object.keys(pdfTemplatesPrelim).length + Object.keys(pdfTemplatesFinal).length;
+            console.log(`✅ 已从服务器加载模板: 参赛证明 ${Object.keys(pdfTemplates).length}, 预赛 ${Object.keys(pdfTemplatesPrelim).length}, 决赛 ${Object.keys(pdfTemplatesFinal).length}`);
+            if (totalCount === 0) {
+                console.warn('⚠️ 当前没有任何模板，请通过管理员后台上传');
             }
         } catch (err) {
-            console.error('加载模板失败', err);
+            console.error('加载模板失败:', err);
         }
     }
 
-    // ========== 查询功能 ==========
+    // ==================== 查询选手信息 ====================
     async function performQuery() {
-        const name = document.getElementById('fullname').value;
-        const region = document.getElementById('region').value;
-        const phone = document.getElementById('phone').value;
-        const org = document.getElementById('organization').value;
+        const name = document.getElementById('fullname').value.trim();
+        const region = document.getElementById('region').value.trim();
+        const phone = document.getElementById('phone').value.trim();
+        const org = document.getElementById('organization').value.trim();
 
         if (!name || !region || !phone || !org) {
             showError("请完整填写姓名、赛区、手机号和所在单位四项信息", true);
+            return;
+        }
+
+        // 简单校验手机号格式
+        const phoneRegex = /^1[3-9]\d{9}$/;
+        if (!phoneRegex.test(phone)) {
+            showError("请输入正确的11位手机号", true);
             return;
         }
 
@@ -297,26 +403,29 @@
             });
             const data = await res.json();
 
-            if (data.found) {
+            if (data.found && data.participant) {
                 showError("", false);
                 await generateCertificate(data.participant);
             } else {
-                showError(`未查找到您的信息，请核对`, true);
+                showError(`未查找到您的信息，请核对姓名、赛区、手机号、单位是否与报名一致`, true);
                 document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><i class="fas fa-search"></i><p>未查找到您的信息</p><p style="font-size:0.8rem;">请检查输入是否正确</p></div>`;
             }
         } catch (err) {
-            showError("查询失败：" + err.message, true);
+            console.error('查询接口错误:', err);
+            showError("查询失败，请稍后重试", true);
         }
     }
 
-    // ========== PDF 渲染函数（将姓名和证书编号都绘制到PDF上） ==========
+    // ==================== PDF 姓名 + 证书编号绘制（与admin端逻辑对齐） ====================
     function formatNameWithSpaces(name) {
         if (!name) return "";
         const trimmed = name.trim();
+        // 两个字的姓名中间加全角空格，使布局更美观
         let namePart = trimmed.length === 2 ? trimmed[0] + "　" + trimmed[1] : trimmed;
         return "　" + namePart + "　";
     }
 
+    // 在 canvas 上替换姓名和绘制证书编号（基于原模板下划线区域）
     async function replaceNameAndCertificateOnCanvas(canvas, name, certificateNumber) {
         return new Promise((resolve) => {
             const ctx = canvas.getContext('2d');
@@ -325,7 +434,7 @@
             const pixels = imgData.data;
             let underlineY = -1, startX = -1, endX = -1;
 
-            // 扫描寻找下划线
+            // 扫描寻找最明显的下划线区域（与 admin 端逻辑一致）
             for (let y = Math.floor(height * 0.3); y < Math.floor(height * 0.8); y++) {
                 let maxLen = 0, lineStart = -1, lineEnd = -1, curLen = 0, curStart = -1;
                 for (let x = 0; x < width; x++) {
@@ -356,6 +465,7 @@
                     break;
                 }
             }
+            // 未检测到下划线则使用默认位置
             if (underlineY === -1) {
                 underlineY = Math.floor(height * 0.6);
                 startX = Math.floor(width * 0.35);
@@ -365,16 +475,16 @@
             const fixedLeft = startX;
             ctx.save();
 
-            // 白色遮罩覆盖原姓名区域（增大宽度以容纳证书编号）
+            // 用白色矩形覆盖原姓名区域（扩大范围，保证证书编号区域干净）
             ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(fixedLeft - 20, underlineY - 95, (endX - startX) + 500, 140);
+            ctx.fillRect(fixedLeft - 20, underlineY - 95, (endX - startX) + 520, 150);
 
             const nameY = underlineY - 32;
             let fontSize = Math.floor(width / 65);
             fontSize = Math.min(fontSize, 80);
             fontSize = Math.max(fontSize, 80);
 
-            // 绘制姓名（左对齐）
+            // 绘制姓名（华文行楷风格）
             ctx.font = `${fontSize}px "华文行楷", "STXingkai", "KaiTi", cursive`;
             ctx.fillStyle = "#000000";
             ctx.textAlign = "left";
@@ -382,7 +492,6 @@
             const formattedName = formatNameWithSpaces(name);
             ctx.fillText(formattedName, fixedLeft, nameY);
 
-            // 测量姓名宽度
             const nameWidth = ctx.measureText(formattedName).width;
 
             // 绘制姓名下划线
@@ -394,9 +503,8 @@
             ctx.lineTo(fixedLeft + nameWidth + 8, underlineYPos);
             ctx.stroke();
 
-            // ========== 绘制证书编号（在姓名右边） ==========
-            if (certificateNumber) {
-                // 证书编号字体大小（约为姓名的55%）
+            // ========== 绘制证书编号（紧邻姓名右侧，与 admin 生成风格一致） ==========
+            if (certificateNumber && certificateNumber !== "") {
                 let certFontSize = Math.floor(fontSize * 0.55);
                 certFontSize = Math.min(certFontSize, 44);
                 certFontSize = Math.max(certFontSize, 22);
@@ -406,35 +514,28 @@
                 ctx.textAlign = "left";
                 ctx.textBaseline = "middle";
 
-                // 分离 NO. 和后面的数字，分别设置样式
+                // 分离 NO. 和数字部分，让 NO. 加粗更醒目
                 const match = certificateNumber.match(/^(NO\.)(.*)$/i);
                 let certText = certificateNumber;
-                let noPart = "";
-                let numPart = "";
-
+                let noPart = "", numPart = "";
                 if (match) {
-                    noPart = match[1];  // "NO."
-                    numPart = match[2];  // 后面的数字
+                    noPart = match[1];
+                    numPart = match[2];
                 }
 
-                // 计算证书编号的X位置（姓名右边 + 适当间距）
                 const certX = fixedLeft + nameWidth + 40;
                 const certY = nameY;
 
                 if (noPart && numPart) {
-                    // 分别绘制 NO.（加粗）和数字（普通）
-                    // 先绘制 NO.
                     ctx.font = `bold ${certFontSize}px "Times New Roman", serif`;
                     ctx.fillStyle = "#000000";
                     const noWidth = ctx.measureText(noPart).width;
                     ctx.fillText(noPart, certX, certY);
 
-                    // 再绘制数字（不加粗）
                     ctx.font = `${certFontSize}px "Times New Roman", serif`;
                     ctx.fillStyle = "#000000";
                     ctx.fillText(numPart, certX + noWidth, certY);
                 } else {
-                    // 如果格式不匹配，直接整体绘制
                     ctx.font = `bold ${certFontSize}px "Times New Roman", serif`;
                     ctx.fillStyle = "#000000";
                     ctx.fillText(certText, certX, certY);
@@ -446,11 +547,13 @@
         });
     }
 
+    // 渲染 PDF 第一页，并执行姓名+证书编号绘制
     async function renderPdfWithReplacements(pdfData, name, certificateNumber) {
+        if (!pdfData || !pdfData.url) throw new Error("模板无效");
         const loadingTask = pdfjsLib.getDocument(pdfData.url);
         const pdf = await loadingTask.promise;
         const page = await pdf.getPage(1);
-        const scale = 3.0;
+        const scale = 3.0;  // 高清输出
         const viewport = page.getViewport({ scale: scale });
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
@@ -459,50 +562,87 @@
         return await replaceNameAndCertificateOnCanvas(canvas, name, certificateNumber);
     }
 
+    // ==================== 生成最终证书展示 ====================
     async function generateCertificate(participant) {
         if (!participant) return false;
         const region = participant.赛区;
+        if (!region) {
+            document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 选手信息缺少赛区字段</p></div>`;
+            return false;
+        }
+
         let pdfData = null;
         if (currentCertType === "participation") pdfData = pdfTemplates[region];
         else if (currentCertType === "preliminary") pdfData = pdfTemplatesPrelim[region];
         else pdfData = pdfTemplatesFinal[region];
 
         if (!pdfData) {
-            document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} 的模板</p></div>`;
+            const certTypeName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖证书' : '决赛获奖证书');
+            document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} 的${certTypeName}模板</p><p style="font-size:0.8rem;">请联系管理员上传对应模板</p></div>`;
             return false;
         }
 
-        document.getElementById('certificateRenderArea').innerHTML = `<div class="loading"><i class="fas fa-spinner fa-pulse fa-2x"></i><p>正在生成证书...</p></div>`;
+        // 显示加载动画
+        document.getElementById('certificateRenderArea').innerHTML = `<div class="loading"><i class="fas fa-spinner fa-pulse fa-2x"></i><p>正在生成证书，请稍候...</p></div>`;
+
         try {
             const certificateNumber = participant.证书编号 || "";
             const canvas = await renderPdfWithReplacements(pdfData, participant.姓名, certificateNumber);
             currentResultCanvas = canvas;
             const imageUrl = canvas.toDataURL('image/png');
-            const certName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖' : '决赛获奖');
+            const certName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖证书' : '决赛获奖证书');
 
-            document.getElementById('certificateRenderArea').innerHTML = `
-                <div style="display:flex;flex-direction:column;align-items:center;">
-                    <div class="pdf-container"><img src="${imageUrl}" class="result-canvas"></div>
-                    <button id="downloadBtn" class="btn-download"><i class="fas fa-download"></i> 下载PNG证书</button>
+            // 构建展示区域，包含选手信息卡片和证书图片
+            const html = `
+                <div style="display:flex;flex-direction:column;align-items:center;width:100%;">
+                    <div class="participant-info-card">
+                        <div class="info-row">
+                            <span class="participant-name"><i class="fas fa-user"></i> ${escapeHtml(participant.姓名)}</span>
+                            <span class="cert-number"><i class="fas fa-certificate"></i> 证书编号：${escapeHtml(certificateNumber || '暂无')}</span>
+                        </div>
+                        <div class="participant-details">
+                            <span><i class="fas fa-map-marker-alt"></i> ${escapeHtml(participant.赛区)}</span>
+                            <span style="margin-left:1rem;"><i class="fas fa-building"></i> ${escapeHtml(participant.所在单位)}</span>
+                        </div>
+                    </div>
+                    <div class="pdf-container">
+                        <img src="${imageUrl}" class="result-canvas" alt="证书图片">
+                    </div>
+                    <button id="downloadBtn" class="btn-download">
+                        <i class="fas fa-download"></i> 下载PNG证书
+                    </button>
                 </div>`;
+            document.getElementById('certificateRenderArea').innerHTML = html;
 
-            document.getElementById('downloadBtn').onclick = () => {
-                const link = document.createElement('a');
-                link.download = `法律英语大赛_${certName}_${participant.姓名}.png`;
-                link.href = currentResultCanvas.toDataURL('image/png');
-                link.click();
-            };
+            // 绑定下载事件
+            const downloadBtn = document.getElementById('downloadBtn');
+            if (downloadBtn) {
+                downloadBtn.onclick = () => {
+                    const link = document.createElement('a');
+                    const serialNo = participant.证书编号 ? `_${participant.证书编号}` : '';
+                    link.download = `法律英语大赛_${certName}_${participant.姓名}${serialNo}.png`;
+                    link.href = currentResultCanvas.toDataURL('image/png');
+                    link.click();
+                };
+            }
             return true;
         } catch (err) {
-            document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>生成失败: ${err.message}</p></div>`;
+            console.error('生成证书失败:', err);
+            document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>生成失败: ${err.message}</p><p style="font-size:0.8rem;">请刷新页面后重试或联系管理员</p></div>`;
             return false;
         }
     }
 
     function showError(msg, show) {
         const div = document.getElementById('errorMsg');
-        if (show) { div.style.display = 'block'; div.querySelector('span').innerText = msg; }
-        else div.style.display = 'none';
+        if (show) {
+            div.style.display = 'block';
+            const span = div.querySelector('span');
+            if (span) span.innerText = msg;
+            else div.innerText = msg;
+        } else {
+            div.style.display = 'none';
+        }
     }
 
     function setCertType(type) {
@@ -513,15 +653,20 @@
         if (type === 'participation') document.getElementById('btnParticipation').classList.add('active');
         else if (type === 'preliminary') document.getElementById('btnPreliminary').classList.add('active');
         else document.getElementById('btnFinal').classList.add('active');
+
+        // 切换证书类型时清空显示区域，提示重新查询
         document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>请查询${type === 'participation' ? '参赛证明' : (type === 'preliminary' ? '预赛获奖证书' : '决赛获奖证书')}</p></div>`;
+        // 同时清除旧的错误提示
+        showError("", false);
     }
 
-    // ========== 绑定事件 ==========
+    // ==================== 事件绑定 & 初始化 ====================
     document.getElementById('searchBtn').addEventListener('click', performQuery);
     document.getElementById('btnParticipation').addEventListener('click', () => setCertType('participation'));
     document.getElementById('btnPreliminary').addEventListener('click', () => setCertType('preliminary'));
     document.getElementById('btnFinal').addEventListener('click', () => setCertType('final'));
 
+    // 支持回车查询
     ['fullname', 'region', 'phone', 'organization'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('keypress', e => { if(e.key === 'Enter') performQuery(); });
