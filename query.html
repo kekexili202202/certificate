@@ -513,11 +513,11 @@
             // ========== 绘制证书编号（NO.加粗，后面数字不加粗） ==========
             if (certificateNumber && certificateNumber !== "") {
                 // 证书编号字号（可调整乘数来改变大小）
-                let certFontSize = Math.floor(fontSize * 0.9);
+                let certFontSize = Math.floor(fontSize * 0.75);
 
 
                 // 证书编号位置（可调整偏移量）
-                const certX = fixedLeft + 1250;   // 向右偏移80像素
+                const certX = fixedLeft + 1200;   // 向右偏移80像素
                 const certY = nameY + fontSize * 0.2;  // 姓名下方
 
                 // 解析证书编号，分离 "NO." 和后面的数字
