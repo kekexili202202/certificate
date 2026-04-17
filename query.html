@@ -510,33 +510,43 @@
             ctx.lineTo(fixedLeft + nameWidth + 8, underlineYPos);
             ctx.stroke();
 
-            // ========== 绘制证书编号（在姓名下方或右侧） ==========
+            // ========== 绘制证书编号（NO.加粗，后面数字不加粗） ==========
             if (certificateNumber && certificateNumber !== "") {
-            // 解析证书编号，分离 "NO." 和 后面的数字
-                 let noPart = "";
-                 let spacePart = " ";
-                 let numPart = "";
-            // 匹配 NO. 或 No. 或 no. 开头的编号
+                // 证书编号字号（可调整乘数来改变大小）
+                let certFontSize = Math.floor(fontSize * 0.55);
+                certFontSize = Math.min(certFontSize, 42);
+                certFontSize = Math.max(certFontSize, 24);
+
+                // 证书编号位置（可调整偏移量）
+                const certX = fixedLeft + 80;   // 向右偏移80像素
+                const certY = nameY + fontSize * 0.7;  // 姓名下方
+
+                // 解析证书编号，分离 "NO." 和后面的数字
+                let noPart = "";
+                let spacePart = " ";
+                let numPart = "";
+
+                // 匹配 NO. 或 No. 或 no. 开头的编号（不区分大小写）
                 const match = certificateNumber.match(/^(NO\.|No\.|no\.)(.*)$/i);
                 if (match) {
                     noPart = match[1];      // "NO."
                     numPart = match[2];     // 后面的数字（可能包含空格）
                 } else {
-            // 如果没有匹配到 NO. 格式，整体不加粗显示
-                numPart = certificateNumber;
+                    // 如果没有匹配到 NO. 格式，整体不加粗显示
+                    numPart = certificateNumber;
                 }
 
-                let currentX = certX + labelWidth;
+                let currentX = certX;
 
-            // 1. 绘制 "NO."（加粗）
+                // 1. 绘制 "NO."（加粗）
                 if (noPart) {
                     ctx.font = `bold ${certFontSize}px "Times New Roman", serif`;
                     ctx.fillStyle = "#000000";
                     ctx.fillText(noPart, currentX, certY);
-                    <!---->urrentX += ctx.measureText(noPart).width;
+                    currentX += ctx.measureText(noPart).width;
                 }
 
-                    // 2. 绘制空格（普通字体，空格也有宽度）
+                // 2. 绘制空格（普通字体）
                 if (spacePart && noPart) {
                     ctx.font = `${certFontSize}px "Times New Roman", serif`;
                     ctx.fillStyle = "#000000";
@@ -544,31 +554,12 @@
                     currentX += ctx.measureText(spacePart).width;
                 }
 
-            // 改证书编号大小，数字越大越大
-                let certFontSize = Math.floor(fontSize * 0.8);
-
-
-                ctx.font = `${certFontSize}px "Times New Roman", serif`;
-                ctx.fillStyle = "#000000";
-                ctx.textAlign = "left";
-                ctx.textBaseline = "middle";
-
-                // 证书编号放在姓名下方（更符合传统证书布局）
-                const certX = fixedLeft+1150;
-                // 改数字高度，数字越小越高
-                const certY = nameY + fontSize * 0.2;
-
-                // 先绘制 "证书编号：" 标签
-                ctx.font = `${certFontSize}px "SimHei", "Microsoft YaHei", sans-serif`;
-                ctx.fillStyle = "#333333";
-                ctx.fillText(" ", certX, certY);
-
-                const labelWidth = ctx.measureText(" ").width;
-
-                // 再绘制证书编号数字（加粗）
-                ctx.font = `bold ${certFontSize}px "Times New Roman", serif`;
-                ctx.fillStyle = "#000000";
-                ctx.fillText(certificateNumber, certX + labelWidth, certY);
+                // 3. 绘制后面的数字（不加粗）
+                if (numPart) {
+                    ctx.font = `${certFontSize}px "Times New Roman", serif`;
+                    ctx.fillStyle = "#000000";
+                    ctx.fillText(numPart, currentX, certY);
+                }
             }
 
             ctx.restore();
