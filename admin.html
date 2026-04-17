@@ -168,19 +168,6 @@
             cursor: pointer;
             font-size: 0.8rem;
         }
-        .server-btn {
-            background: #17a2b8;
-            color: white;
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 2rem;
-            cursor: pointer;
-            font-size: 0.8rem;
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-        }
-        .server-btn:hover { background: #138496; }
         .title-section { text-align: center; margin: 0.5rem 0 2rem 0; }
         .main-title {
             font-size: 2.5rem;
@@ -408,7 +395,6 @@
         <div class="upload-area">
             <label class="upload-label" for="fileInput"><i class="fas fa-file-excel"></i> 导入 Excel 数据</label>
             <input type="file" id="fileInput" accept=".xlsx, .xls, .csv">
-            <button class="server-btn" id="loadServerExcelBtn"><i class="fas fa-cloud-upload-alt"></i> 从服务器加载数据</button>
             <div class="data-status" id="dataStatus"><i class="fas fa-database"></i> 未加载数据</div>
             <div class="template-status" id="templateStatus"><i class="fas fa-file-pdf"></i> 暂无模板</div>
             <button class="sample-btn" id="loadSampleBtn"><i class="fas fa-chalkboard-user"></i> 加载演示数据</button>
@@ -489,7 +475,6 @@
         console.log("开始从 GitHub 加载模板...");
         const regions = ["华北及东北赛区", "华东赛区", "华南赛区", "西南赛区", "西北赛区"];
 
-        // 清空现有模板
         pdfTemplates = {};
 
         for (const region of regions) {
@@ -513,19 +498,20 @@
         updateTemplateStatusDisplay();
         const count = Object.keys(pdfTemplates).length;
         if (count > 0) {
-            alert(`已自动从 GitHub 加载 ${count} 个参赛证明模板`);
+            console.log(`已自动从 GitHub 加载 ${count} 个参赛证明模板`);
         } else {
-            alert(`⚠️ 未找到任何模板！\n\n请确保：\n1. 项目中有 templates_pdf 文件夹\n2. 文件夹里有5个赛区的PDF文件\n3. 文件已提交并推送到 GitHub`);
+            console.warn(`⚠️ 未找到任何模板！`);
         }
     }
 
-    // ========== 从后端加载数据 ==========
+    // ========== 从后端数据库加载选手数据（每次打开页面自动调用） ==========
     async function loadParticipantsFromServer() {
         try {
             const res = await fetch('/api/participants');
             const data = await res.json();
             const count = data.length;
             document.getElementById('dataStatus').innerHTML = `<i class="fas fa-check-circle"></i> 已加载 ${count} 条数据`;
+            console.log(`从数据库加载了 ${count} 条选手数据`);
             return data;
         } catch (err) {
             console.error('加载选手数据失败', err);
@@ -545,7 +531,7 @@
         });
     }
 
-    // ========== 上传到后端 ==========
+    // ========== 上传选手数据到数据库（覆盖旧数据） ==========
     async function uploadParticipantsToServer(participants) {
         try {
             const res = await fetch('/api/participants/upload', {
@@ -558,7 +544,7 @@
             });
             const data = await res.json();
             if (data.success) {
-                alert(`成功导入 ${data.count} 条数据`);
+                alert(`成功导入 ${data.count} 条数据到数据库`);
                 await loadParticipantsFromServer();
                 return true;
             } else {
@@ -642,31 +628,6 @@
         }
     }
 
-    // ========== 从服务器加载 Excel 数据 ==========
-    async function loadExcelFromServer() {
-        const btn = document.getElementById('loadServerExcelBtn');
-        const originalText = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> 加载中...';
-        btn.disabled = true;
-
-        try {
-            const res = await fetch('/api/load-excel');
-            const result = await res.json();
-
-            if (result.success) {
-                await uploadParticipantsToServer(result.data);
-                alert(`✅ 成功从服务器加载 ${result.count} 条数据！`);
-            } else {
-                alert('❌ 加载失败：' + result.error + '\n\n请确保 Excel 文件已上传到服务器');
-            }
-        } catch (err) {
-            alert('❌ 加载失败：' + err.message);
-        } finally {
-            btn.innerHTML = originalText;
-            btn.disabled = false;
-        }
-    }
-
     // ========== 查询功能 ==========
     async function performQuery() {
         const name = document.getElementById('fullname').value;
@@ -734,12 +695,12 @@
 
         const prelimContainer = document.getElementById('preliminaryTemplateList');
         if (prelimContainer) {
-            prelimContainer.innerHTML = '<div class="empty-templates">暂无预赛获奖模板（可从GitHub加载）</div>';
+            prelimContainer.innerHTML = '<div class="empty-templates">暂无预赛获奖模板</div>';
         }
 
         const finalContainer = document.getElementById('finalTemplateList');
         if (finalContainer) {
-            finalContainer.innerHTML = '<div class="empty-templates">暂无决赛获奖模板（可从GitHub加载）</div>';
+            finalContainer.innerHTML = '<div class="empty-templates">暂无决赛获奖模板</div>';
         }
     }
 
@@ -774,36 +735,68 @@
         input.click();
     };
 
-    // ========== Excel 处理 ==========
+    // ========== Excel 导入处理（上传后覆盖数据库） ==========
     function handleExcelFile(file) {
         const reader = new FileReader();
         reader.onload = async function(e) {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
-            if (!rows.length || rows.length < 2) { alert("Excel无数据"); return; }
-
-            const participants = [];
-            for (let i = 1; i < rows.length; i++) {
-                const row = rows[i];
-                if (row[1] && row[2] && row[3] && row[4]) {
-                    participants.push({
-                        姓名: String(row[1] || ''),
-                        赛区: String(row[2] || ''),
-                        手机号: String(row[3] || ''),
-                        所在单位: String(row[4] || '')
-                    });
+                if (!rows.length || rows.length < 2) {
+                    alert("Excel无数据");
+                    return;
                 }
-            }
 
-            if (participants.length === 0) {
-                alert("请确保Excel包含：第2列姓名、第3列赛区、第4列手机号、第5列所在学校");
-                return;
-            }
+                // 获取表头，查找列位置
+                const headers = rows[0];
+                let nameIdx = -1, regionIdx = -1, phoneIdx = -1, orgIdx = -1;
 
-            await uploadParticipantsToServer(participants);
+                for (let i = 0; i < headers.length; i++) {
+                    const h = String(headers[i] || '');
+                    if (h.includes('姓名')) nameIdx = i;
+                    if (h.includes('赛区')) regionIdx = i;
+                    if (h.includes('手机')) phoneIdx = i;
+                    if (h.includes('单位') || h.includes('学校')) orgIdx = i;
+                }
+
+                // 如果没找到表头，使用默认列位置（第1列姓名，第2列赛区，第3列手机号，第4列单位）
+                if (nameIdx === -1) nameIdx = 0;
+                if (regionIdx === -1) regionIdx = 1;
+                if (phoneIdx === -1) phoneIdx = 2;
+                if (orgIdx === -1) orgIdx = 3;
+
+                const participants = [];
+                for (let i = 1; i < rows.length; i++) {
+                    const row = rows[i];
+                    const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
+                    const region = row[regionIdx] ? String(row[regionIdx]).trim() : '';
+                    const phone = row[phoneIdx] ? String(row[phoneIdx]).trim() : '';
+                    const org = row[orgIdx] ? String(row[orgIdx]).trim() : '';
+
+                    if (name && region && phone && org) {
+                        participants.push({
+                            姓名: name,
+                            赛区: region,
+                            手机号: phone,
+                            所在单位: org
+                        });
+                    }
+                }
+
+                if (participants.length === 0) {
+                    alert("请确保Excel包含：姓名、赛区、手机号、所在单位");
+                    return;
+                }
+
+                await uploadParticipantsToServer(participants);
+
+            } catch (err) {
+                console.error("解析Excel失败:", err);
+                alert("解析Excel失败：" + err.message);
+            }
         };
         reader.readAsArrayBuffer(file);
     }
@@ -817,7 +810,7 @@
             { 姓名: "端木静怡", 赛区: "西南赛区", 手机号: "18912347777", 所在单位: "四川大学" }
         ];
         await uploadParticipantsToServer(demoData);
-        alert("已加载演示数据！\n\n可尝试查询：\n姓名: 李思琪\n赛区: 华北及东北赛区\n手机号: 13812348888\n单位: 中国政法大学");
+        alert("已加载演示数据到数据库！\n\n可尝试查询：\n姓名: 李思琪\n赛区: 华北及东北赛区\n手机号: 13812348888\n单位: 中国政法大学");
         document.getElementById('fullname').value = "李思琪";
         document.getElementById('region').value = "华北及东北赛区";
         document.getElementById('phone').value = "13812348888";
@@ -936,13 +929,10 @@
             const imageUrl = canvas.toDataURL('image/png');
             const certName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖' : '决赛获奖');
 
-            // 获取证书编号
             const certificateNumber = participant.证书编号 || "生成中";
 
-            // 构建带证书编号显示的页面
             document.getElementById('certificateRenderArea').innerHTML = `
                 <div style="display:flex;flex-direction:column;align-items:center;width:100%;">
-                    <!-- 选手信息卡片，包含姓名和证书编号 -->
                     <div class="participant-info-card">
                         <div class="info-row">
                             <span class="participant-name"><i class="fas fa-user"></i> ${escapeHtml(participant.姓名)}</span>
@@ -953,7 +943,6 @@
                             <span style="margin-left:1rem;"><i class="fas fa-building"></i> ${escapeHtml(participant.所在单位)}</span>
                         </div>
                     </div>
-                    <!-- PDF证书图片 -->
                     <div class="pdf-container">
                         <img src="${imageUrl}" class="result-canvas">
                     </div>
@@ -1006,7 +995,6 @@
 
     // ========== 绑定事件 ==========
     document.getElementById('fileInput').addEventListener('change', e => { if(e.target.files.length) handleExcelFile(e.target.files[0]); });
-    document.getElementById('loadServerExcelBtn').addEventListener('click', loadExcelFromServer);
     document.getElementById('loadSampleBtn').addEventListener('click', loadDemoData);
     document.getElementById('searchBtn').addEventListener('click', performQuery);
     document.getElementById('btnParticipation').addEventListener('click', () => setCertType('participation'));
@@ -1022,8 +1010,11 @@
     // ========== 启动初始化 ==========
     async function initializeData() {
         console.log("页面启动，开始初始化...");
+        // 1. 从 GitHub 加载 PDF 模板
         await loadTemplatesFromGitHub();
-        await loadExcelFromServer();
+        // 2. 从数据库自动加载选手数据
+        await loadParticipantsFromServer();
+        console.log("初始化完成");
     }
 
     initializeData();
