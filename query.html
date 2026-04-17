@@ -513,7 +513,7 @@
             // ========== 绘制证书编号（在姓名下方或右侧） ==========
             if (certificateNumber && certificateNumber !== "") {
             // 改证书编号大小，数字越大越大
-                let certFontSize = Math.floor(fontSize * 12);
+                let certFontSize = Math.floor(fontSize * 0.8);
 
 
                 ctx.font = `${certFontSize}px "Times New Roman", serif`;
@@ -522,7 +522,7 @@
                 ctx.textBaseline = "middle";
 
                 // 证书编号放在姓名下方（更符合传统证书布局）
-                const certX = fixedLeft+1500;
+                const certX = fixedLeft+500;
                 // 改数字高度，数字越小越高
                 const certY = nameY + fontSize * 0.2;
 
