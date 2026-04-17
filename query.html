@@ -512,6 +512,38 @@
 
             // ========== 绘制证书编号（在姓名下方或右侧） ==========
             if (certificateNumber && certificateNumber !== "") {
+            // 解析证书编号，分离 "NO." 和 后面的数字
+                 let noPart = "";
+                 let spacePart = " ";
+                 let numPart = "";
+            // 匹配 NO. 或 No. 或 no. 开头的编号
+                const match = certificateNumber.match(/^(NO\.|No\.|no\.)(.*)$/i);
+                if (match) {
+                    noPart = match[1];      // "NO."
+                    numPart = match[2];     // 后面的数字（可能包含空格）
+                } else {
+            // 如果没有匹配到 NO. 格式，整体不加粗显示
+                numPart = certificateNumber;
+                }
+
+                let currentX = certX + labelWidth;
+
+            // 1. 绘制 "NO."（加粗）
+                if (noPart) {
+                    ctx.font = `bold ${certFontSize}px "Times New Roman", serif`;
+                    ctx.fillStyle = "#000000";
+                    ctx.fillText(noPart, currentX, certY);
+                    <!---->urrentX += ctx.measureText(noPart).width;
+                }
+
+                    // 2. 绘制空格（普通字体，空格也有宽度）
+                if (spacePart && noPart) {
+                    ctx.font = `${certFontSize}px "Times New Roman", serif`;
+                    ctx.fillStyle = "#000000";
+                    ctx.fillText(spacePart, currentX, certY);
+                    currentX += ctx.measureText(spacePart).width;
+                }
+
             // 改证书编号大小，数字越大越大
                 let certFontSize = Math.floor(fontSize * 0.8);
 
@@ -522,7 +554,7 @@
                 ctx.textBaseline = "middle";
 
                 // 证书编号放在姓名下方（更符合传统证书布局）
-                const certX = fixedLeft+500;
+                const certX = fixedLeft+1150;
                 // 改数字高度，数字越小越高
                 const certY = nameY + fontSize * 0.2;
 
