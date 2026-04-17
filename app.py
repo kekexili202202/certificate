@@ -4,6 +4,7 @@ import sqlite3
 import base64
 from datetime import datetime
 from openpyxl import load_workbook
+import os
 
 app = Flask(__name__, static_url_path='', static_folder='.')
 CORS(app)
@@ -24,24 +25,46 @@ REGION_CODE = {
 CODE_TO_REGION = {v: k for k, v in REGION_CODE.items()}
 
 
-# 初始化数据库
+# 初始化数据库（增加字段存在性检查）
 def init_db():
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
 
-    # 选手数据表（增加 region_code 和 serial_number 字段）
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS participants (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            region TEXT NOT NULL,
-            region_code TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            organization TEXT NOT NULL,
-            serial_number INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
+    # 检查 participants 表是否存在
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='participants'")
+    table_exists = c.fetchone()
+
+    if not table_exists:
+        # 创建新表（包含所有字段）
+        c.execute('''
+            CREATE TABLE participants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                region TEXT NOT NULL,
+                region_code TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                organization TEXT NOT NULL,
+                serial_number INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        print("创建 participants 表")
+    else:
+        # 检查并添加缺失的字段（兼容旧数据库）
+        c.execute("PRAGMA table_info(participants)")
+        columns = [col[1] for col in c.fetchall()]
+
+        if 'region_code' not in columns:
+            c.execute("ALTER TABLE participants ADD COLUMN region_code TEXT DEFAULT ''")
+            print("添加 region_code 字段")
+
+        if 'serial_number' not in columns:
+            c.execute("ALTER TABLE participants ADD COLUMN serial_number INTEGER DEFAULT 0")
+            print("添加 serial_number 字段")
+
+        if 'created_at' not in columns:
+            c.execute("ALTER TABLE participants ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            print("添加 created_at 字段")
 
     # 模板数据表
     c.execute('''
@@ -85,8 +108,23 @@ def get_participants():
     """获取所有选手数据"""
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-    c.execute('SELECT id, name, region, region_code, phone, organization, serial_number FROM participants ORDER BY id')
-    rows = c.fetchall()
+
+    # 使用 try-except 处理可能的字段缺失
+    try:
+        c.execute(
+            'SELECT id, name, region, region_code, phone, organization, serial_number FROM participants ORDER BY id')
+        rows = c.fetchall()
+    except sqlite3.OperationalError as e:
+        # 如果字段不存在，重新初始化数据库
+        print(f"查询失败: {e}，重新初始化数据库...")
+        conn.close()
+        init_db()
+        conn = sqlite3.connect('data.db')
+        c = conn.cursor()
+        c.execute(
+            'SELECT id, name, region, region_code, phone, organization, serial_number FROM participants ORDER BY id')
+        rows = c.fetchall()
+
     conn.close()
 
     participants = []
@@ -149,12 +187,25 @@ def query_participant():
 
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-    c.execute('''
-        SELECT name, region, region_code, phone, organization, serial_number FROM participants
-        WHERE name = ? AND region = ? AND phone = ? AND organization = ?
-    ''', (name, region, phone, organization))
 
-    row = c.fetchone()
+    try:
+        c.execute('''
+            SELECT name, region, region_code, phone, organization, serial_number FROM participants
+            WHERE name = ? AND region = ? AND phone = ? AND organization = ?
+        ''', (name, region, phone, organization))
+        row = c.fetchone()
+    except sqlite3.OperationalError as e:
+        print(f"查询失败: {e}，重新初始化数据库...")
+        conn.close()
+        init_db()
+        conn = sqlite3.connect('data.db')
+        c = conn.cursor()
+        c.execute('''
+            SELECT name, region, region_code, phone, organization, serial_number FROM participants
+            WHERE name = ? AND region = ? AND phone = ? AND organization = ?
+        ''', (name, region, phone, organization))
+        row = c.fetchone()
+
     conn.close()
 
     if row:
@@ -275,30 +326,43 @@ def clear_templates():
 def load_excel():
     """从服务器读取 Excel 文件"""
     try:
+        # 检查文件是否存在
+        if not os.path.exists('法律英语大赛网站测试.xlsx'):
+            return jsonify({'success': False, 'error': 'Excel文件不存在，请上传文件到服务器'})
+
         wb = load_workbook('法律英语大赛网站测试.xlsx')
         ws = wb.active
 
         # 获取表头（第一行）
         headers = []
         for cell in ws[1]:
-            headers.append(cell.value)
+            headers.append(cell.value if cell.value else '')
 
-        # 找到各列的索引（第一列是赛区序号，第二列是姓名，第三列是赛区，第四列是手机号，第五列是所在学校）
-        region_code_idx = headers.index('赛区序号') if '赛区序号' in headers else 0
-        name_idx = headers.index('姓名') if '姓名' in headers else 1
-        region_idx = headers.index('赛区') if '赛区' in headers else 2
-        phone_idx = headers.index('手机号') if '手机号' in headers else 3
-        org_idx = headers.index('所在学校') if '所在学校' in headers else 4
+        # 找到各列的索引
+        name_idx = 1
+        region_idx = 2
+        phone_idx = 3
+        org_idx = 4
+
+        for i, h in enumerate(headers):
+            if h and '姓名' in str(h):
+                name_idx = i
+            elif h and '赛区' in str(h):
+                region_idx = i
+            elif h and '手机' in str(h):
+                phone_idx = i
+            elif h and ('单位' in str(h) or '学校' in str(h)):
+                org_idx = i
 
         # 读取数据（从第二行开始）
         participants = []
         for row in ws.iter_rows(min_row=2, values_only=True):
-            if row[name_idx]:  # 如果姓名不为空
+            if row and len(row) > name_idx and row[name_idx]:  # 如果姓名不为空
                 participants.append({
                     '姓名': str(row[name_idx]) if row[name_idx] else '',
-                    '赛区': str(row[region_idx]) if row[region_idx] else '',
-                    '手机号': str(row[phone_idx]) if row[phone_idx] else '',
-                    '所在单位': str(row[org_idx]) if row[org_idx] else ''
+                    '赛区': str(row[region_idx]) if len(row) > region_idx and row[region_idx] else '',
+                    '手机号': str(row[phone_idx]) if len(row) > phone_idx and row[phone_idx] else '',
+                    '所在单位': str(row[org_idx]) if len(row) > org_idx and row[org_idx] else ''
                 })
 
         wb.close()
@@ -328,7 +392,5 @@ def serve_static(path):
 
 
 if __name__ == '__main__':
-    import os
-
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
