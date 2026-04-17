@@ -512,7 +512,7 @@
 
             // ========== 绘制证书编号（在姓名下方或右侧） ==========
             if (certificateNumber && certificateNumber !== "") {
-                let certFontSize = Math.floor(fontSize * 0.45);
+                let certFontSize = Math.floor(fontSize * 0.65);
                 certFontSize = Math.min(certFontSize, 36);
                 certFontSize = Math.max(certFontSize, 18);
 
@@ -523,7 +523,7 @@
 
                 // 证书编号放在姓名下方（更符合传统证书布局）
                 const certX = fixedLeft;
-                const certY = nameY + fontSize * 0.7;
+                const certY = nameY + fontSize * 0.55;
 
                 // 先绘制 "证书编号：" 标签
                 ctx.font = `${certFontSize}px "SimHei", "Microsoft YaHei", sans-serif`;
@@ -534,7 +534,7 @@
 
                 // 再绘制证书编号数字（加粗）
                 ctx.font = `bold ${certFontSize}px "Times New Roman", serif`;
-                ctx.fillStyle = "#8b5a2b";
+                ctx.fillStyle = "#000000";
                 ctx.fillText(certificateNumber, certX + labelWidth, certY);
             }
 
