@@ -151,41 +151,8 @@
             border-radius: 8px;
             overflow: hidden;
             max-width: 100%;
-            position: relative;
         }
         .result-canvas { display: block; max-width: 100%; height: auto; }
-
-        /* 证书编号显示样式 - 在姓名右边 */
-        .participant-info-card {
-            background: #faf6ed;
-            border-radius: 1rem;
-            padding: 1rem;
-            margin-bottom: 1rem;
-            width: 100%;
-            border: 1px solid #eeddbb;
-        }
-        .participant-info-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-        }
-        .participant-name-large {
-            font-size: 1.3rem;
-            font-weight: 700;
-            color: #2c553d;
-        }
-        .cert-number-display {
-            font-family: monospace;
-            font-size: 0.85rem;
-            color: #8b5a2b;
-            background: white;
-            padding: 0.3rem 0.8rem;
-            border-radius: 1.5rem;
-            border: 1px solid #eddabc;
-        }
-
         .btn-download {
             background: #2c5f2d;
             border: none;
@@ -202,7 +169,6 @@
         .empty-state { padding: 3rem; text-align: center; color: #a28e6f; }
         .loading { text-align: center; padding: 2rem; color: #2c5a6e; }
         .loading i { font-size: 2rem; margin-bottom: 1rem; }
-
         @media (max-width: 780px) {
             .certificate-preview { padding: 1rem; }
             .main-title { font-size: 1.8rem; }
@@ -266,7 +232,6 @@
     let pdfTemplatesFinal = {};
     let currentCertType = "participation";
     let currentResultCanvas = null;
-    let currentCertificateNumber = "";  // 存储当前查询到的证书编号
 
     const validRegions = ["华北及东北赛区", "西北赛区", "西南赛区", "华东赛区", "华南赛区"];
 
@@ -334,7 +299,6 @@
 
             if (data.found) {
                 showError("", false);
-                currentCertificateNumber = data.participant.证书编号 || "";  // 保存证书编号
                 await generateCertificate(data.participant);
             } else {
                 showError(`未查找到您的信息，请核对`, true);
@@ -345,7 +309,7 @@
         }
     }
 
-    // ========== PDF 渲染函数 ==========
+    // ========== PDF 渲染函数（将姓名和证书编号都绘制到PDF上） ==========
     function formatNameWithSpaces(name) {
         if (!name) return "";
         const trimmed = name.trim();
@@ -353,7 +317,7 @@
         return "　" + namePart + "　";
     }
 
-    async function replaceNameOnCanvas(canvas, name) {
+    async function replaceNameAndCertificateOnCanvas(canvas, name, certificateNumber) {
         return new Promise((resolve) => {
             const ctx = canvas.getContext('2d');
             const width = canvas.width, height = canvas.height;
@@ -361,6 +325,7 @@
             const pixels = imgData.data;
             let underlineY = -1, startX = -1, endX = -1;
 
+            // 扫描寻找下划线
             for (let y = Math.floor(height * 0.3); y < Math.floor(height * 0.8); y++) {
                 let maxLen = 0, lineStart = -1, lineEnd = -1, curLen = 0, curStart = -1;
                 for (let x = 0; x < width; x++) {
@@ -399,32 +364,89 @@
 
             const fixedLeft = startX;
             ctx.save();
+
+            // 白色遮罩覆盖原姓名区域（增大宽度以容纳证书编号）
             ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(fixedLeft - 20, underlineY - 95, (endX - startX) + 300, 140);
+            ctx.fillRect(fixedLeft - 20, underlineY - 95, (endX - startX) + 500, 140);
+
             const nameY = underlineY - 32;
             let fontSize = Math.floor(width / 65);
             fontSize = Math.min(fontSize, 80);
             fontSize = Math.max(fontSize, 80);
+
+            // 绘制姓名（左对齐）
             ctx.font = `${fontSize}px "华文行楷", "STXingkai", "KaiTi", cursive`;
             ctx.fillStyle = "#000000";
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
-            const formatted = formatNameWithSpaces(name);
-            ctx.fillText(formatted, fixedLeft, nameY);
-            const textWidth = ctx.measureText(formatted).width;
+            const formattedName = formatNameWithSpaces(name);
+            ctx.fillText(formattedName, fixedLeft, nameY);
+
+            // 测量姓名宽度
+            const nameWidth = ctx.measureText(formattedName).width;
+
+            // 绘制姓名下划线
             const underlineYPos = nameY + fontSize * 0.48;
             ctx.beginPath();
             ctx.lineWidth = Math.max(fontSize * 0.07, 3);
             ctx.strokeStyle = "#000000";
             ctx.moveTo(fixedLeft - 3, underlineYPos);
-            ctx.lineTo(fixedLeft + textWidth + 8, underlineYPos);
+            ctx.lineTo(fixedLeft + nameWidth + 8, underlineYPos);
             ctx.stroke();
+
+            // ========== 绘制证书编号（在姓名右边） ==========
+            if (certificateNumber) {
+                // 证书编号字体大小（约为姓名的55%）
+                let certFontSize = Math.floor(fontSize * 0.55);
+                certFontSize = Math.min(certFontSize, 44);
+                certFontSize = Math.max(certFontSize, 22);
+
+                ctx.font = `${certFontSize}px "Times New Roman", serif`;
+                ctx.fillStyle = "#000000";
+                ctx.textAlign = "left";
+                ctx.textBaseline = "middle";
+
+                // 分离 NO. 和后面的数字，分别设置样式
+                const match = certificateNumber.match(/^(NO\.)(.*)$/i);
+                let certText = certificateNumber;
+                let noPart = "";
+                let numPart = "";
+
+                if (match) {
+                    noPart = match[1];  // "NO."
+                    numPart = match[2];  // 后面的数字
+                }
+
+                // 计算证书编号的X位置（姓名右边 + 适当间距）
+                const certX = fixedLeft + nameWidth + 40;
+                const certY = nameY;
+
+                if (noPart && numPart) {
+                    // 分别绘制 NO.（加粗）和数字（普通）
+                    // 先绘制 NO.
+                    ctx.font = `bold ${certFontSize}px "Times New Roman", serif`;
+                    ctx.fillStyle = "#000000";
+                    const noWidth = ctx.measureText(noPart).width;
+                    ctx.fillText(noPart, certX, certY);
+
+                    // 再绘制数字（不加粗）
+                    ctx.font = `${certFontSize}px "Times New Roman", serif`;
+                    ctx.fillStyle = "#000000";
+                    ctx.fillText(numPart, certX + noWidth, certY);
+                } else {
+                    // 如果格式不匹配，直接整体绘制
+                    ctx.font = `bold ${certFontSize}px "Times New Roman", serif`;
+                    ctx.fillStyle = "#000000";
+                    ctx.fillText(certText, certX, certY);
+                }
+            }
+
             ctx.restore();
             resolve(canvas);
         });
     }
 
-    async function renderPdfWithNameReplacement(pdfData, name) {
+    async function renderPdfWithReplacements(pdfData, name, certificateNumber) {
         const loadingTask = pdfjsLib.getDocument(pdfData.url);
         const pdf = await loadingTask.promise;
         const page = await pdf.getPage(1);
@@ -434,18 +456,7 @@
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
-        return await replaceNameOnCanvas(canvas, name);
-    }
-
-    // HTML转义函数
-    function escapeHtml(str) {
-        if (!str) return "";
-        return str.replace(/[&<>]/g, function(m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
-        });
+        return await replaceNameAndCertificateOnCanvas(canvas, name, certificateNumber);
     }
 
     async function generateCertificate(participant) {
@@ -463,37 +474,21 @@
 
         document.getElementById('certificateRenderArea').innerHTML = `<div class="loading"><i class="fas fa-spinner fa-pulse fa-2x"></i><p>正在生成证书...</p></div>`;
         try {
-            const canvas = await renderPdfWithNameReplacement(pdfData, participant.姓名);
+            const certificateNumber = participant.证书编号 || "";
+            const canvas = await renderPdfWithReplacements(pdfData, participant.姓名, certificateNumber);
             currentResultCanvas = canvas;
             const imageUrl = canvas.toDataURL('image/png');
             const certName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖' : '决赛获奖');
 
-            // 构建带证书编号显示的页面
             document.getElementById('certificateRenderArea').innerHTML = `
-                <div style="display:flex;flex-direction:column;align-items:center;width:100%;">
-                    <!-- 选手信息卡片，包含姓名和证书编号 -->
-                    <div class="participant-info-card" style="width:100%;">
-                        <div class="participant-info-row">
-                            <span class="participant-name-large"><i class="fas fa-user"></i> ${escapeHtml(participant.姓名)}</span>
-                            <span class="cert-number-display"><i class="fas fa-certificate"></i> 证书编号：${escapeHtml(currentCertificateNumber)}</span>
-                        </div>
-                        <div style="margin-top:0.5rem; font-size:0.8rem; color:#8b6b42;">
-                            <span><i class="fas fa-map-marker-alt"></i> ${escapeHtml(participant.赛区)}</span>
-                            <span style="margin-left:1rem;"><i class="fas fa-building"></i> ${escapeHtml(participant.所在单位)}</span>
-                        </div>
-                    </div>
-                    <!-- PDF证书图片 -->
-                    <div class="pdf-container">
-                        <img src="${imageUrl}" class="result-canvas">
-                    </div>
-                    <button id="downloadBtn" class="btn-download">
-                        <i class="fas fa-download"></i> 下载PNG证书
-                    </button>
+                <div style="display:flex;flex-direction:column;align-items:center;">
+                    <div class="pdf-container"><img src="${imageUrl}" class="result-canvas"></div>
+                    <button id="downloadBtn" class="btn-download"><i class="fas fa-download"></i> 下载PNG证书</button>
                 </div>`;
 
             document.getElementById('downloadBtn').onclick = () => {
                 const link = document.createElement('a');
-                link.download = `法律英语大赛_${certName}_${participant.姓名}_${currentCertificateNumber}.png`;
+                link.download = `法律英语大赛_${certName}_${participant.姓名}.png`;
                 link.href = currentResultCanvas.toDataURL('image/png');
                 link.click();
             };
