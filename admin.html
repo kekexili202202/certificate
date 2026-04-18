@@ -608,8 +608,11 @@
         }
     }
 
+
     async function batchUploadTemplates(templates) {
         try {
+            console.log("准备上传模板数量:", templates.length);
+
             const res = await fetch('/api/templates/batch_upload', {
                 method: 'POST',
                 headers: {
@@ -620,10 +623,13 @@
             });
 
             if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
+                const errorText = await res.text();
+                console.error("服务器错误响应:", errorText);
+                throw new Error(`HTTP ${res.status}: ${res.statusText}`);
             }
 
             const data = await res.json();
+            console.log("批量上传响应:", data);
             return data;
         } catch (err) {
             console.error('批量上传失败:', err);
@@ -685,6 +691,7 @@
                         filename: file.name,
                         pdf_data: base64
                     });
+                    console.log(`成功读取: ${file.name}`);
                 } catch (err) {
                     errors.push(`${file.name}: 读取失败 - ${err.message}`);
                 }
@@ -704,7 +711,7 @@
                 let message = `✅ 成功上传 ${result.success_count} 个模板`;
                 if (result.fail_count > 0) {
                     message += `\n❌ 失败 ${result.fail_count} 个`;
-                    if (result.errors.length > 0) {
+                    if (result.errors && result.errors.length > 0) {
                         message += `\n错误详情:\n${result.errors.join('\n')}`;
                     }
                 }

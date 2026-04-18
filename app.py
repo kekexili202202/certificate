@@ -3,13 +3,12 @@ from flask_cors import CORS
 import sqlite3
 import base64
 from datetime import datetime
-from openpyxl import load_workbook
 import os
 
 app = Flask(__name__, static_url_path='', static_folder='.')
 CORS(app)
 
-# 管理员密钥（可以改成你自己的密码）
+# 管理员密钥
 ADMIN_KEY = "admin123456"
 
 # 赛区编号映射
@@ -21,21 +20,17 @@ REGION_CODE = {
     "西北赛区": "05"
 }
 
-# 反向映射（用于从编号找赛区）
 CODE_TO_REGION = {v: k for k, v in REGION_CODE.items()}
 
 
-# 初始化数据库
 def init_db():
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
 
-    # 检查 participants 表是否存在
     c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='participants'")
     table_exists = c.fetchone()
 
     if not table_exists:
-        # 创建新表（包含所有字段）
         c.execute('''
             CREATE TABLE participants (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,31 +47,20 @@ def init_db():
         ''')
         print("创建 participants 表")
     else:
-        # 检查并添加缺失的字段
         c.execute("PRAGMA table_info(participants)")
         columns = [col[1] for col in c.fetchall()]
 
         if 'region_code' not in columns:
             c.execute("ALTER TABLE participants ADD COLUMN region_code TEXT DEFAULT ''")
-            print("添加 region_code 字段")
-
         if 'certificate_number' not in columns:
             c.execute("ALTER TABLE participants ADD COLUMN certificate_number TEXT DEFAULT ''")
-            print("添加 certificate_number 字段")
-
         if 'award_level' not in columns:
             c.execute("ALTER TABLE participants ADD COLUMN award_level TEXT DEFAULT ''")
-            print("添加 award_level 字段")
-
         if 'cert_type' not in columns:
             c.execute("ALTER TABLE participants ADD COLUMN cert_type TEXT DEFAULT ''")
-            print("添加 cert_type 字段")
-
         if 'created_at' not in columns:
             c.execute("ALTER TABLE participants ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-            print("添加 created_at 字段")
 
-    # 模板数据表
     c.execute('''
         CREATE TABLE IF NOT EXISTS templates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,24 +85,11 @@ init_db()
 
 @app.route('/api/participants', methods=['GET'])
 def get_participants():
-    """获取所有选手数据"""
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-
-    try:
-        c.execute(
-            'SELECT id, name, region, phone, organization, certificate_number, award_level, cert_type FROM participants ORDER BY id')
-        rows = c.fetchall()
-    except sqlite3.OperationalError as e:
-        print(f"查询失败: {e}，重新初始化数据库...")
-        conn.close()
-        init_db()
-        conn = sqlite3.connect('data.db')
-        c = conn.cursor()
-        c.execute(
-            'SELECT id, name, region, phone, organization, certificate_number, award_level, cert_type FROM participants ORDER BY id')
-        rows = c.fetchall()
-
+    c.execute(
+        'SELECT id, name, region, phone, organization, certificate_number, award_level, cert_type FROM participants ORDER BY id')
+    rows = c.fetchall()
     conn.close()
 
     participants = []
@@ -138,7 +109,6 @@ def get_participants():
 
 @app.route('/api/participants/upload', methods=['POST'])
 def upload_participants():
-    """上传选手数据（支持多个sheet）"""
     key = request.headers.get('X-Admin-Key')
     if key != ADMIN_KEY:
         return jsonify({'error': '无权操作'}), 401
@@ -149,12 +119,10 @@ def upload_participants():
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
 
-    # 清空原有数据
     c.execute('DELETE FROM participants')
 
     total_count = 0
 
-    # 处理每个sheet的数据
     for cert_type, participants in sheets_data.items():
         for p in participants:
             name = p.get('姓名', '')
@@ -179,7 +147,6 @@ def upload_participants():
 
 @app.route('/api/participants/clear', methods=['DELETE', 'POST'])
 def clear_participants():
-    """清空所有选手数据"""
     key = request.headers.get('X-Admin-Key')
     if key != ADMIN_KEY:
         return jsonify({'error': '无权操作'}), 401
@@ -195,7 +162,6 @@ def clear_participants():
 
 @app.route('/api/participants/query', methods=['POST'])
 def query_participant():
-    """查询选手信息（参赛证明）"""
     data = request.json
     name = data.get('name', '').strip()
     region = data.get('region', '').strip()
@@ -204,25 +170,11 @@ def query_participant():
 
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-
-    try:
-        c.execute('''
-            SELECT name, region, phone, organization, certificate_number FROM participants
-            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND (cert_type = '' OR cert_type = 'participation')
-        ''', (name, region, phone, organization))
-        row = c.fetchone()
-    except sqlite3.OperationalError as e:
-        print(f"查询失败: {e}，重新初始化数据库...")
-        conn.close()
-        init_db()
-        conn = sqlite3.connect('data.db')
-        c = conn.cursor()
-        c.execute('''
-            SELECT name, region, phone, organization, certificate_number FROM participants
-            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND (cert_type = '' OR cert_type = 'participation')
-        ''', (name, region, phone, organization))
-        row = c.fetchone()
-
+    c.execute('''
+        SELECT name, region, phone, organization, certificate_number FROM participants
+        WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND (cert_type = '' OR cert_type = 'participation')
+    ''', (name, region, phone, organization))
+    row = c.fetchone()
     conn.close()
 
     if row:
@@ -242,7 +194,6 @@ def query_participant():
 
 @app.route('/api/participants/query_with_award', methods=['POST'])
 def query_participant_with_award():
-    """查询选手信息（包含奖项等级，用于预赛和决赛）"""
     data = request.json
     name = data.get('name', '').strip()
     region = data.get('region', '').strip()
@@ -252,25 +203,11 @@ def query_participant_with_award():
 
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-
-    try:
-        c.execute('''
-            SELECT name, region, phone, organization, certificate_number, award_level FROM participants
-            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND cert_type = ?
-        ''', (name, region, phone, organization, cert_type))
-        row = c.fetchone()
-    except sqlite3.OperationalError as e:
-        print(f"查询失败: {e}，重新初始化数据库...")
-        conn.close()
-        init_db()
-        conn = sqlite3.connect('data.db')
-        c = conn.cursor()
-        c.execute('''
-            SELECT name, region, phone, organization, certificate_number, award_level FROM participants
-            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND cert_type = ?
-        ''', (name, region, phone, organization, cert_type))
-        row = c.fetchone()
-
+    c.execute('''
+        SELECT name, region, phone, organization, certificate_number, award_level FROM participants
+        WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND cert_type = ?
+    ''', (name, region, phone, organization, cert_type))
+    row = c.fetchone()
     conn.close()
 
     if row:
@@ -293,7 +230,6 @@ def query_participant_with_award():
 
 @app.route('/api/templates', methods=['GET'])
 def get_templates():
-    """获取所有模板"""
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
     c.execute('SELECT cert_type, region, award_level, filename, pdf_data FROM templates')
@@ -336,7 +272,6 @@ def get_templates():
 
 @app.route('/api/templates/upload', methods=['POST'])
 def upload_template():
-    """上传模板（支持奖项等级）"""
     key = request.headers.get('X-Admin-Key')
     if key != ADMIN_KEY:
         return jsonify({'error': '无权操作'}), 401
@@ -351,11 +286,9 @@ def upload_template():
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
 
-    # 删除旧的同类型同赛区同奖项模板
     c.execute('DELETE FROM templates WHERE cert_type = ? AND region = ? AND award_level = ?',
               (cert_type, region, award_level))
 
-    # 插入新模板
     c.execute('''
         INSERT INTO templates (cert_type, region, award_level, filename, pdf_data)
         VALUES (?, ?, ?, ?, ?)
@@ -369,13 +302,15 @@ def upload_template():
 
 @app.route('/api/templates/batch_upload', methods=['POST'])
 def batch_upload_templates():
-    """批量上传模板"""
     key = request.headers.get('X-Admin-Key')
     if key != ADMIN_KEY:
         return jsonify({'error': '无权操作'}), 401
 
     data = request.json
     templates_list = data.get('templates', [])
+
+    if not templates_list:
+        return jsonify({'success': False, 'error': '没有模板数据'}), 400
 
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
@@ -397,11 +332,9 @@ def batch_upload_templates():
                 errors.append(f"缺少必要字段: {filename}")
                 continue
 
-            # 删除旧的同类型同赛区同奖项模板
             c.execute('DELETE FROM templates WHERE cert_type = ? AND region = ? AND award_level = ?',
                       (cert_type, region, award_level))
 
-            # 插入新模板
             c.execute('''
                 INSERT INTO templates (cert_type, region, award_level, filename, pdf_data)
                 VALUES (?, ?, ?, ?, ?)
@@ -425,7 +358,6 @@ def batch_upload_templates():
 
 @app.route('/api/templates/delete', methods=['DELETE'])
 def delete_template():
-    """删除模板"""
     key = request.headers.get('X-Admin-Key')
     if key != ADMIN_KEY:
         return jsonify({'error': '无权操作'}), 401
@@ -447,7 +379,6 @@ def delete_template():
 
 @app.route('/api/templates/clear', methods=['DELETE'])
 def clear_templates():
-    """清空所有模板"""
     key = request.headers.get('X-Admin-Key')
     if key != ADMIN_KEY:
         return jsonify({'error': '无权操作'}), 401
@@ -465,19 +396,16 @@ def clear_templates():
 
 @app.route('/')
 def index():
-    """查询页面（分享给用户）"""
     return send_from_directory('.', 'query.html')
 
 
 @app.route('/admin')
 def admin():
-    """管理员页面（你自己用）"""
     return send_from_directory('.', 'admin.html')
 
 
 @app.route('/<path:path>')
 def serve_static(path):
-    """提供静态文件"""
     return send_from_directory('.', path)
 
 
