@@ -163,7 +163,7 @@ def upload_participants():
             phone = p.get('手机号', '')
             organization = p.get('所在单位', '')
             certificate_number = p.get('证书编号', '')
-            award_level = p.get('奖项等级', '')  # 预赛和决赛专用
+            award_level = p.get('奖项等级', '')
 
             c.execute('''
                 INSERT INTO participants (name, region, region_code, phone, organization, certificate_number, award_level, cert_type)
@@ -367,6 +367,62 @@ def upload_template():
     return jsonify({'success': True})
 
 
+@app.route('/api/templates/batch_upload', methods=['POST'])
+def batch_upload_templates():
+    """批量上传模板"""
+    key = request.headers.get('X-Admin-Key')
+    if key != ADMIN_KEY:
+        return jsonify({'error': '无权操作'}), 401
+
+    data = request.json
+    templates_list = data.get('templates', [])
+
+    conn = sqlite3.connect('data.db')
+    c = conn.cursor()
+
+    success_count = 0
+    fail_count = 0
+    errors = []
+
+    for template in templates_list:
+        try:
+            cert_type = template.get('cert_type')
+            region = template.get('region')
+            award_level = template.get('award_level', '')
+            filename = template.get('filename')
+            pdf_data = template.get('pdf_data')
+
+            if not cert_type or not region or not filename or not pdf_data:
+                fail_count += 1
+                errors.append(f"缺少必要字段: {filename}")
+                continue
+
+            # 删除旧的同类型同赛区同奖项模板
+            c.execute('DELETE FROM templates WHERE cert_type = ? AND region = ? AND award_level = ?',
+                      (cert_type, region, award_level))
+
+            # 插入新模板
+            c.execute('''
+                INSERT INTO templates (cert_type, region, award_level, filename, pdf_data)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (cert_type, region, award_level, filename, pdf_data))
+            success_count += 1
+
+        except Exception as e:
+            fail_count += 1
+            errors.append(f"{template.get('filename', 'unknown')}: {str(e)}")
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'success_count': success_count,
+        'fail_count': fail_count,
+        'errors': errors
+    })
+
+
 @app.route('/api/templates/delete', methods=['DELETE'])
 def delete_template():
     """删除模板"""
@@ -427,4 +483,4 @@ def serve_static(path):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=True)

@@ -90,7 +90,7 @@
             cursor: pointer;
             font-size: 0.75rem;
         }
-        .upload-template-btn {
+        .upload-folder-btn, .upload-template-btn {
             background: #28a745;
             color: white;
             border: none;
@@ -101,7 +101,9 @@
             display: inline-flex;
             align-items: center;
             gap: 5px;
+            margin-right: 0.5rem;
         }
+        .upload-folder-btn { background: #17a2b8; }
         .clear-all-btn {
             background: #dc3545;
             color: white;
@@ -121,6 +123,14 @@
             border-radius: 0.5rem;
         }
         .empty-templates { color: #6c757d; font-size: 0.8rem; padding: 0.5rem 0; }
+        .upload-progress {
+            background: #e3f2fd;
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            margin-top: 0.5rem;
+            font-size: 0.75rem;
+            display: none;
+        }
 
         .upload-bar {
             background: white;
@@ -373,20 +383,28 @@
             <div class="template-section">
                 <h4><i class="fas fa-scroll"></i> 参赛证明模板</h4>
                 <div id="participationTemplateList"></div>
-                <button class="upload-template-btn" onclick="uploadTemplate('participation')"><i class="fas fa-upload"></i> 上传参赛证明模板</button>
+                <button class="upload-template-btn" onclick="uploadSingleTemplate('participation')"><i class="fas fa-upload"></i> 上传单个模板</button>
+                <button class="upload-folder-btn" onclick="uploadFolderTemplates('participation')"><i class="fas fa-folder-open"></i> 批量上传文件夹</button>
             </div>
             <div class="template-section">
                 <h4><i class="fas fa-trophy"></i> 预赛获奖证书模板</h4>
                 <div id="preliminaryTemplateList"></div>
-                <button class="upload-template-btn" onclick="uploadTemplate('preliminary')"><i class="fas fa-upload"></i> 上传预赛获奖模板</button>
+                <button class="upload-template-btn" onclick="uploadSingleTemplate('preliminary')"><i class="fas fa-upload"></i> 上传单个模板</button>
+                <button class="upload-folder-btn" onclick="uploadFolderTemplates('preliminary')"><i class="fas fa-folder-open"></i> 批量上传文件夹</button>
             </div>
             <div class="template-section">
                 <h4><i class="fas fa-crown"></i> 决赛获奖证书模板</h4>
                 <div id="finalTemplateList"></div>
-                <button class="upload-template-btn" onclick="uploadTemplate('final')"><i class="fas fa-upload"></i> 上传决赛获奖模板</button>
+                <button class="upload-template-btn" onclick="uploadSingleTemplate('final')"><i class="fas fa-upload"></i> 上传单个模板</button>
+                <button class="upload-folder-btn" onclick="uploadFolderTemplates('final')"><i class="fas fa-folder-open"></i> 批量上传文件夹</button>
             </div>
             <div><button class="clear-all-btn" id="clearAllTemplatesBtn"><i class="fas fa-trash-alt"></i> 清空所有模板</button></div>
-            <div class="admin-note"><i class="fas fa-info-circle"></i> 模板命名需包含赛区名称和奖项等级<br>支持的赛区：华北及东北赛区、西北赛区、西南赛区、华东赛区、华南赛区<br>预赛/决赛模板示例：华北及东北赛区预赛一等奖.pdf、华北及东北赛区决赛二等奖.pdf</div>
+            <div class="admin-note"><i class="fas fa-info-circle"></i> 模板命名规则：<br>
+            - 参赛证明：赛区名称+参赛证明.pdf（如：华北及东北赛区参赛证明.pdf）<br>
+            - 预赛获奖：赛区名称+预赛+奖项等级.pdf（如：华北及东北赛区预赛一等奖.pdf）<br>
+            - 决赛获奖：赛区名称+决赛+奖项等级.pdf（如：华北及东北赛区决赛一等奖.pdf）<br>
+            支持的赛区：华北及东北赛区、西北赛区、西南赛区、华东赛区、华南赛区</div>
+            <div id="uploadProgress" class="upload-progress"></div>
         </div>
     </div>
 
@@ -458,14 +476,6 @@
     const ADMIN_KEY = "admin123456";
     const validRegions = ["华北及东北赛区", "西北赛区", "西南赛区", "华东赛区", "华南赛区"];
 
-    const regionCodeMap = {
-        "华北及东北赛区": "01",
-        "华南赛区": "02",
-        "华东赛区": "03",
-        "西南赛区": "04",
-        "西北赛区": "05"
-    };
-
     function escapeHtml(str) {
         if (!str) return "";
         return str.replace(/[&<>]/g, function(m) {
@@ -476,19 +486,42 @@
         });
     }
 
+    function detectRegionFromFilename(filename) {
+        for (const region of validRegions) {
+            if (filename.includes(region)) return region;
+        }
+        return null;
+    }
+
+    function detectAwardLevelFromFilename(filename, certType) {
+        if (certType === 'preliminary' || certType === 'final') {
+            if (filename.includes('一等奖')) return '一等奖';
+            if (filename.includes('二等奖')) return '二等奖';
+            if (filename.includes('三等奖')) return '三等奖';
+        }
+        return '';
+    }
+
     async function loadTemplatesFromServer() {
         try {
+            console.log("正在加载模板...");
             const res = await fetch('/api/templates');
+
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+            }
+
             const data = await res.json();
+            console.log("模板数据加载成功");
 
             pdfTemplates = data.participation || {};
             pdfTemplatesPrelim = data.preliminary || {};
             pdfTemplatesFinal = data.final || {};
 
             updateTemplateStatusDisplay();
-            console.log("模板加载完成:", { pdfTemplates, pdfTemplatesPrelim, pdfTemplatesFinal });
         } catch (err) {
-            console.error('加载模板失败', err);
+            console.error('加载模板失败:', err);
+            document.getElementById('templateStatus').innerHTML = `<i class="fas fa-exclamation-triangle"></i> 加载失败`;
         }
     }
 
@@ -545,7 +578,7 @@
         }
     }
 
-    async function uploadTemplateToServer(certType, region, awardLevel, file) {
+    async function uploadSingleTemplateToServer(certType, region, awardLevel, file) {
         const base64 = await blobToBase64(file);
         try {
             const res = await fetch('/api/templates/upload', {
@@ -562,16 +595,172 @@
                     pdf_data: base64
                 })
             });
-            const data = await res.json();
-            if (data.success) {
-                await loadTemplatesFromServer();
-                return true;
+
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
             }
-            return false;
+
+            const data = await res.json();
+            return data.success;
         } catch (err) {
-            alert('上传失败：' + err.message);
+            console.error('上传失败:', err);
             return false;
         }
+    }
+
+    async function batchUploadTemplates(templates) {
+        try {
+            const res = await fetch('/api/templates/batch_upload', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Admin-Key': ADMIN_KEY
+                },
+                body: JSON.stringify({ templates: templates })
+            });
+
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+
+            const data = await res.json();
+            return data;
+        } catch (err) {
+            console.error('批量上传失败:', err);
+            return { success: false, error: err.message };
+        }
+    }
+
+    async function uploadFolderTemplates(certType) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.webkitdirectory = true;
+        input.directory = true;
+        input.multiple = true;
+
+        input.onchange = async function(e) {
+            const files = Array.from(e.target.files);
+            const pdfFiles = files.filter(f => f.name.toLowerCase().endsWith('.pdf'));
+
+            if (pdfFiles.length === 0) {
+                alert('文件夹中没有PDF文件');
+                return;
+            }
+
+            const progressDiv = document.getElementById('uploadProgress');
+            progressDiv.style.display = 'block';
+            progressDiv.innerHTML = `<i class="fas fa-spinner fa-pulse"></i> 正在处理 ${pdfFiles.length} 个PDF文件...`;
+
+            const templatesToUpload = [];
+            const errors = [];
+
+            for (let i = 0; i < pdfFiles.length; i++) {
+                const file = pdfFiles[i];
+                const region = detectRegionFromFilename(file.name);
+
+                if (!region) {
+                    errors.push(`${file.name}: 无法识别赛区`);
+                    progressDiv.innerHTML = `<i class="fas fa-spinner fa-pulse"></i> 处理中... (${i+1}/${pdfFiles.length}) 发现无效文件: ${file.name}`;
+                    continue;
+                }
+
+                let awardLevel = '';
+                if (certType === 'preliminary' || certType === 'final') {
+                    awardLevel = detectAwardLevelFromFilename(file.name, certType);
+                    if (!awardLevel) {
+                        errors.push(`${file.name}: 无法识别奖项等级（需要包含一等奖/二等奖/三等奖）`);
+                        progressDiv.innerHTML = `<i class="fas fa-spinner fa-pulse"></i> 处理中... (${i+1}/${pdfFiles.length}) 发现无效文件: ${file.name}`;
+                        continue;
+                    }
+                }
+
+                progressDiv.innerHTML = `<i class="fas fa-spinner fa-pulse"></i> 正在读取 ${file.name}... (${i+1}/${pdfFiles.length})`;
+
+                try {
+                    const base64 = await blobToBase64(file);
+                    templatesToUpload.push({
+                        cert_type: certType,
+                        region: region,
+                        award_level: awardLevel,
+                        filename: file.name,
+                        pdf_data: base64
+                    });
+                } catch (err) {
+                    errors.push(`${file.name}: 读取失败 - ${err.message}`);
+                }
+            }
+
+            if (templatesToUpload.length === 0) {
+                progressDiv.innerHTML = `<div style="color: red;">❌ 没有有效的模板文件<br>${errors.join('<br>')}</div>`;
+                setTimeout(() => { progressDiv.style.display = 'none'; }, 5000);
+                return;
+            }
+
+            progressDiv.innerHTML = `<i class="fas fa-spinner fa-pulse"></i> 正在上传 ${templatesToUpload.length} 个模板到服务器...`;
+
+            const result = await batchUploadTemplates(templatesToUpload);
+
+            if (result.success) {
+                let message = `✅ 成功上传 ${result.success_count} 个模板`;
+                if (result.fail_count > 0) {
+                    message += `\n❌ 失败 ${result.fail_count} 个`;
+                    if (result.errors.length > 0) {
+                        message += `\n错误详情:\n${result.errors.join('\n')}`;
+                    }
+                }
+                if (errors.length > 0) {
+                    message += `\n\n跳过无效文件:\n${errors.join('\n')}`;
+                }
+                alert(message);
+                await loadTemplatesFromServer();
+            } else {
+                alert(`批量上传失败: ${result.error || '未知错误'}`);
+            }
+
+            progressDiv.style.display = 'none';
+        };
+
+        input.click();
+    }
+
+    async function uploadSingleTemplate(certType) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.pdf';
+        input.onchange = async function(e) {
+            if (e.target.files.length) {
+                const file = e.target.files[0];
+                const region = detectRegionFromFilename(file.name);
+                if (!region) {
+                    alert(`无法识别赛区，文件名需包含：${validRegions.join(', ')}`);
+                    return;
+                }
+
+                let awardLevel = '';
+                if (certType === 'preliminary') {
+                    awardLevel = detectAwardLevelFromFilename(file.name, certType);
+                    if (!awardLevel) {
+                        alert('预赛证书文件名需包含奖项等级：一等奖、二等奖、三等奖');
+                        return;
+                    }
+                } else if (certType === 'final') {
+                    awardLevel = detectAwardLevelFromFilename(file.name, certType);
+                    if (!awardLevel) {
+                        alert('决赛证书文件名需包含奖项等级：一等奖、二等奖、三等奖');
+                        return;
+                    }
+                }
+
+                const success = await uploadSingleTemplateToServer(certType, region, awardLevel, file);
+                if (success) {
+                    alert(`✅ 成功添加 ${region} ${awardLevel ? awardLevel : ''} 的模板`);
+                    await loadTemplatesFromServer();
+                } else {
+                    alert('上传失败');
+                }
+            }
+        };
+        input.click();
     }
 
     async function deleteTemplateFromServer(certType, region, awardLevel) {
@@ -584,6 +773,11 @@
                 },
                 body: JSON.stringify({ cert_type: certType, region: region, award_level: awardLevel })
             });
+
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+
             const data = await res.json();
             if (data.success) {
                 await loadTemplatesFromServer();
@@ -591,6 +785,7 @@
             }
             return false;
         } catch (err) {
+            console.error('删除失败:', err);
             alert('删除失败：' + err.message);
             return false;
         }
@@ -603,60 +798,20 @@
                 method: 'DELETE',
                 headers: { 'X-Admin-Key': ADMIN_KEY }
             });
+
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+
             const data = await res.json();
             if (data.success) {
                 await loadTemplatesFromServer();
                 alert('已清空所有模板');
             }
         } catch (err) {
+            console.error('清空失败:', err);
             alert('清空失败：' + err.message);
         }
-    }
-
-    async function performQuery() {
-        const name = document.getElementById('fullname').value;
-        const region = document.getElementById('region').value;
-        const phone = document.getElementById('phone').value;
-        const org = document.getElementById('organization').value;
-
-        if (!name || !region || !phone || !org) {
-            showError("请完整填写四项信息", true);
-            return;
-        }
-
-        try {
-            let url = '/api/participants/query';
-            let body = { name, region, phone, organization: org };
-
-            if (currentCertType !== 'participation') {
-                url = '/api/participants/query_with_award';
-                body.cert_type = currentCertType;
-            }
-
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            const data = await res.json();
-
-            if (data.found) {
-                showError("", false);
-                await generateCertificate(data.participant);
-            } else {
-                showError(`未查找到您的${currentCertType === 'participation' ? '参赛信息' : (currentCertType === 'preliminary' ? '预赛获奖信息' : '决赛获奖信息')}，请核对`, true);
-                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><i class="fas fa-search"></i><p>未查找到您的信息</p></div>`;
-            }
-        } catch (err) {
-            showError("查询失败：" + err.message, true);
-        }
-    }
-
-    function detectRegionFromFilename(filename) {
-        for (const region of validRegions) {
-            if (filename.includes(region)) return region;
-        }
-        return null;
     }
 
     function updateTemplateStatusDisplay() {
@@ -672,7 +827,6 @@
 
         document.getElementById('templateStatus').innerHTML = `<i class="fas fa-check-circle"></i> 参赛:${pc} 预赛:${preCount} 决赛:${finalCount}`;
 
-        // 更新参赛证明模板显示
         const participationContainer = document.getElementById('participationTemplateList');
         if (participationContainer) {
             if (pc > 0) {
@@ -686,7 +840,6 @@
             }
         }
 
-        // 更新预赛获奖模板显示
         const preliminaryContainer = document.getElementById('preliminaryTemplateList');
         if (preliminaryContainer) {
             if (preCount > 0) {
@@ -702,7 +855,6 @@
             }
         }
 
-        // 更新决赛获奖模板显示
         const finalContainer = document.getElementById('finalTemplateList');
         if (finalContainer) {
             if (finalCount > 0) {
@@ -725,52 +877,9 @@
         }
     };
 
-    let pendingCertType = null;
-    window.uploadTemplate = function(certType) {
-        pendingCertType = certType;
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.pdf';
-        input.onchange = async function(e) {
-            if (e.target.files.length) {
-                const file = e.target.files[0];
-                const region = detectRegionFromFilename(file.name);
-                if (!region) {
-                    alert(`无法识别赛区，文件名需包含：${validRegions.join(', ')}`);
-                    return;
-                }
+    window.uploadSingleTemplate = uploadSingleTemplate;
+    window.uploadFolderTemplates = uploadFolderTemplates;
 
-                let awardLevel = '';
-                if (certType === 'preliminary') {
-                    if (file.name.includes('一等奖')) awardLevel = '一等奖';
-                    else if (file.name.includes('二等奖')) awardLevel = '二等奖';
-                    else if (file.name.includes('三等奖')) awardLevel = '三等奖';
-                    else {
-                        alert('预赛证书文件名需包含奖项等级：一等奖、二等奖、三等奖');
-                        return;
-                    }
-                } else if (certType === 'final') {
-                    if (file.name.includes('一等奖')) awardLevel = '一等奖';
-                    else if (file.name.includes('二等奖')) awardLevel = '二等奖';
-                    else if (file.name.includes('三等奖')) awardLevel = '三等奖';
-                    else {
-                        alert('决赛证书文件名需包含奖项等级：一等奖、二等奖、三等奖');
-                        return;
-                    }
-                }
-
-                const success = await uploadTemplateToServer(pendingCertType, region, awardLevel, file);
-                if (success) {
-                    alert(`✅ 成功添加 ${region} ${awardLevel ? awardLevel : ''} 的模板`);
-                } else {
-                    alert('上传失败');
-                }
-            }
-        };
-        input.click();
-    };
-
-    // ========== Excel 导入处理 ==========
     function handleExcelFile(file) {
         const reader = new FileReader();
         reader.onload = async function(e) {
@@ -784,7 +893,6 @@
                     'final': []
                 };
 
-                // 处理每个sheet
                 for (const sheetName of workbook.SheetNames) {
                     let cert_type = '';
                     if (sheetName.includes('参赛证明')) cert_type = 'participation';
@@ -797,7 +905,6 @@
 
                     if (!rows.length || rows.length < 2) continue;
 
-                    // 列索引：B=姓名, C=赛区, D=手机号, E=所在单位, G=证书编号, H=奖项等级（预赛/决赛）
                     const nameIdx = 1;
                     const regionIdx = 2;
                     const phoneIdx = 3;
@@ -956,6 +1063,45 @@
         canvas.height = viewport.height;
         await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
         return await replaceNameOnCanvas(canvas, name);
+    }
+
+    async function performQuery() {
+        const name = document.getElementById('fullname').value;
+        const region = document.getElementById('region').value;
+        const phone = document.getElementById('phone').value;
+        const org = document.getElementById('organization').value;
+
+        if (!name || !region || !phone || !org) {
+            showError("请完整填写四项信息", true);
+            return;
+        }
+
+        try {
+            let url = '/api/participants/query';
+            let body = { name, region, phone, organization: org };
+
+            if (currentCertType !== 'participation') {
+                url = '/api/participants/query_with_award';
+                body.cert_type = currentCertType;
+            }
+
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+
+            if (data.found) {
+                showError("", false);
+                await generateCertificate(data.participant);
+            } else {
+                showError(`未查找到您的${currentCertType === 'participation' ? '参赛信息' : (currentCertType === 'preliminary' ? '预赛获奖信息' : '决赛获奖信息')}，请核对`, true);
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><i class="fas fa-search"></i><p>未查找到您的信息</p></div>`;
+            }
+        } catch (err) {
+            showError("查询失败：" + err.message, true);
+        }
     }
 
     async function generateCertificate(participant) {
