@@ -708,8 +708,9 @@
         input.click();
     };
 
-        // ========== Excel 导入处理（G列读取证书编号） ==========
-    // Excel列说明：A=序号, B=姓名, C=赛区, D=手机号, E=所在单位, G=证书编号
+        // ========== Excel 导入处理 ==========
+    // 读取列：B=姓名, C=赛区, D=手机号, E=所在单位, G=证书编号
+    // 不读取A列（赛区序号）
     function handleExcelFile(file) {
         const reader = new FileReader();
         reader.onload = async function(e) {
@@ -724,27 +725,25 @@
                     return;
                 }
 
-                // 列索引：0=A, 1=B, 2=C, 3=D, 4=E, 6=G（跳过F列）
-                const serialIdx = 0;    // A列：序号
+                // 列索引：A=0, B=1, C=2, D=3, E=4, F=5(公式), G=6
                 const nameIdx = 1;       // B列：姓名
                 const regionIdx = 2;     // C列：赛区
                 const phoneIdx = 3;      // D列：手机号
                 const orgIdx = 4;        // E列：所在单位
-                const certIdx = 6;       // G列：证书编号（第7列，索引6）
+                const certIdx = 6;       // G列：证书编号
 
                 const participants = [];
 
                 for (let i = 1; i < rows.length; i++) {
                     const row = rows[i];
 
-                    const serialValue = row[serialIdx] !== undefined ? String(row[serialIdx]).trim() : '';
                     const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
                     const region = row[regionIdx] ? String(row[regionIdx]).trim() : '';
                     const phone = row[phoneIdx] ? String(row[phoneIdx]).trim() : '';
                     const org = row[orgIdx] ? String(row[orgIdx]).trim() : '';
                     const certificateNumber = row[certIdx] ? String(row[certIdx]).trim() : '';
 
-                    console.log(`第${i}行: 序号="${serialValue}", 姓名=${name}, 证书编号=${certificateNumber}`);
+                    console.log(`第${i}行: 姓名=${name}, 赛区=${region}, 手机=${phone}, 单位=${org}, 证书编号=${certificateNumber}`);
 
                     if (name && region && phone && org && certificateNumber) {
                         participants.push({
@@ -752,18 +751,17 @@
                             赛区: region,
                             手机号: phone,
                             所在单位: org,
-                            赛区序号: serialValue,
                             证书编号: certificateNumber
                         });
                     } else {
-                        console.warn(`第${i}行数据不完整，跳过: 证书编号=${certificateNumber}`);
+                        console.warn(`第${i}行数据不完整，跳过: 姓名=${name}, 证书编号=${certificateNumber}`);
                     }
                 }
 
                 console.log(`共解析 ${participants.length} 条有效数据`);
 
                 if (participants.length === 0) {
-                    alert("没有解析到有效数据，请确保Excel格式：\nA列=序号\nB列=姓名\nC列=赛区\nD列=手机号\nE列=所在单位\nG列=证书编号");
+                    alert("没有解析到有效数据，请确保Excel格式：\nB列=姓名\nC列=赛区\nD列=手机号\nE列=所在单位\nG列=证书编号");
                     return;
                 }
 
