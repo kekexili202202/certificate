@@ -647,8 +647,24 @@
         const regionCode = regionCodeMap[region] || "00";
 
         // 3. 赛区序号转3位数（如 6 → "006"）
-        const serialNum = parseInt(regionSerial, 10) || 0;
+        // 调试：打印原始值
+        console.log("=== 生成证书编号调试 ===");
+        console.log("原始 regionSerial:", regionSerial, "类型:", typeof regionSerial);
+        // 将序号转为数字
+        let serialNum = 0;
+        if (typeof regionSerial === 'number') {
+            serialNum = regionSerial;
+        } else if (typeof regionSerial === 'string') {
+            serialNum = parseInt(regionSerial, 10);
+        } else {
+            serialNum = Number(regionSerial) || 0;
+        }
+        // 如果还是 NaN，设为 0
+        if (isNaN(serialNum)) serialNum = 0;
+        console.log("转换后的数字 serialNum:", serialNum);
+        // 补零到3位
         const serialPadded = String(serialNum).padStart(3, '0');
+        console.log("补零后 serialPadded:", serialPadded);
 
         // 4. 手机号后4位
         const phoneLast4 = phone.slice(-4);
