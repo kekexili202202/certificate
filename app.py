@@ -25,7 +25,7 @@ REGION_CODE = {
 CODE_TO_REGION = {v: k for k, v in REGION_CODE.items()}
 
 
-# 初始化数据库（增加字段存在性检查）
+# 初始化数据库
 def init_db():
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
@@ -44,13 +44,13 @@ def init_db():
                 region_code TEXT NOT NULL,
                 phone TEXT NOT NULL,
                 organization TEXT NOT NULL,
-                serial_number INTEGER DEFAULT 0,
+                certificate_number TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         print("创建 participants 表")
     else:
-        # 检查并添加缺失的字段（兼容旧数据库）
+        # 检查并添加缺失的字段
         c.execute("PRAGMA table_info(participants)")
         columns = [col[1] for col in c.fetchall()]
 
@@ -58,9 +58,9 @@ def init_db():
             c.execute("ALTER TABLE participants ADD COLUMN region_code TEXT DEFAULT ''")
             print("添加 region_code 字段")
 
-        if 'serial_number' not in columns:
-            c.execute("ALTER TABLE participants ADD COLUMN serial_number INTEGER DEFAULT 0")
-            print("添加 serial_number 字段")
+        if 'certificate_number' not in columns:
+            c.execute("ALTER TABLE participants ADD COLUMN certificate_number TEXT DEFAULT ''")
+            print("添加 certificate_number 字段")
 
         if 'created_at' not in columns:
             c.execute("ALTER TABLE participants ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
@@ -86,21 +86,6 @@ def init_db():
 init_db()
 
 
-def get_next_serial_number(region_code):
-    """获取某个赛区的下一个序号"""
-    conn = sqlite3.connect('data.db')
-    c = conn.cursor()
-    c.execute('SELECT MAX(serial_number) FROM participants WHERE region_code = ?', (region_code,))
-    result = c.fetchone()[0]
-    conn.close()
-    return (result or 0) + 1
-
-
-def generate_certificate_number(region_code, serial_number, phone_last4):
-    """生成证书编号 NO.NLEC2026 + 赛区编号 + 序号(4位) + 手机号后4位"""
-    return f"NO.NLEC2026{region_code}{str(serial_number).zfill(4)}{phone_last4}"
-
-
 # ==================== 选手数据接口 ====================
 
 @app.route('/api/participants', methods=['GET'])
@@ -109,42 +94,36 @@ def get_participants():
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
 
-    # 使用 try-except 处理可能的字段缺失
     try:
-        c.execute(
-            'SELECT id, name, region, region_code, phone, organization, serial_number FROM participants ORDER BY id')
+        c.execute('SELECT id, name, region, phone, organization, certificate_number FROM participants ORDER BY id')
         rows = c.fetchall()
     except sqlite3.OperationalError as e:
-        # 如果字段不存在，重新初始化数据库
         print(f"查询失败: {e}，重新初始化数据库...")
         conn.close()
         init_db()
         conn = sqlite3.connect('data.db')
         c = conn.cursor()
-        c.execute(
-            'SELECT id, name, region, region_code, phone, organization, serial_number FROM participants ORDER BY id')
+        c.execute('SELECT id, name, region, phone, organization, certificate_number FROM participants ORDER BY id')
         rows = c.fetchall()
 
     conn.close()
 
     participants = []
     for row in rows:
-        phone_last4 = row[4][-4:] if len(row[4]) >= 4 else row[4]
-        cert_number = generate_certificate_number(row[3], row[6], phone_last4)
         participants.append({
             'id': row[0],
             '姓名': row[1],
             '赛区': row[2],
-            '手机号': row[4],
-            '所在单位': row[5],
-            '证书编号': cert_number
+            '手机号': row[3],
+            '所在单位': row[4],
+            '证书编号': row[5] if row[5] else ''
         })
     return jsonify(participants)
 
 
 @app.route('/api/participants/upload', methods=['POST'])
 def upload_participants():
-    """上传选手数据"""
+    """上传选手数据（直接使用Excel中的证书编号）"""
     key = request.headers.get('X-Admin-Key')
     if key != ADMIN_KEY:
         return jsonify({'error': '无权操作'}), 401
@@ -158,17 +137,19 @@ def upload_participants():
     # 清空原有数据
     c.execute('DELETE FROM participants')
 
-    # 插入新数据，自动生成序号
+    # 插入新数据，直接使用Excel中的证书编号
     for p in participants:
+        name = p.get('姓名', '')
         region = p.get('赛区', '')
         region_code = REGION_CODE.get(region, '00')
         phone = p.get('手机号', '')
-        serial_number = get_next_serial_number(region_code)
+        organization = p.get('所在单位', '')
+        certificate_number = p.get('证书编号', '')
 
         c.execute('''
-            INSERT INTO participants (name, region, region_code, phone, organization, serial_number)
+            INSERT INTO participants (name, region, region_code, phone, organization, certificate_number)
             VALUES (?, ?, ?, ?, ?, ?)
-        ''', (p.get('姓名', ''), region, region_code, phone, p.get('所在单位', ''), serial_number))
+        ''', (name, region, region_code, phone, organization, certificate_number))
 
     conn.commit()
     conn.close()
@@ -176,9 +157,25 @@ def upload_participants():
     return jsonify({'success': True, 'count': len(participants)})
 
 
+@app.route('/api/participants/clear', methods=['DELETE', 'POST'])
+def clear_participants():
+    """清空所有选手数据"""
+    key = request.headers.get('X-Admin-Key')
+    if key != ADMIN_KEY:
+        return jsonify({'error': '无权操作'}), 401
+
+    conn = sqlite3.connect('data.db')
+    c = conn.cursor()
+    c.execute('DELETE FROM participants')
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True, 'count': 0})
+
+
 @app.route('/api/participants/query', methods=['POST'])
 def query_participant():
-    """查询选手信息（返回包含证书编号）"""
+    """查询选手信息（直接返回数据库中的证书编号）"""
     data = request.json
     name = data.get('name', '').strip()
     region = data.get('region', '').strip()
@@ -190,7 +187,7 @@ def query_participant():
 
     try:
         c.execute('''
-            SELECT name, region, region_code, phone, organization, serial_number FROM participants
+            SELECT name, region, phone, organization, certificate_number FROM participants
             WHERE name = ? AND region = ? AND phone = ? AND organization = ?
         ''', (name, region, phone, organization))
         row = c.fetchone()
@@ -201,7 +198,7 @@ def query_participant():
         conn = sqlite3.connect('data.db')
         c = conn.cursor()
         c.execute('''
-            SELECT name, region, region_code, phone, organization, serial_number FROM participants
+            SELECT name, region, phone, organization, certificate_number FROM participants
             WHERE name = ? AND region = ? AND phone = ? AND organization = ?
         ''', (name, region, phone, organization))
         row = c.fetchone()
@@ -209,16 +206,14 @@ def query_participant():
     conn.close()
 
     if row:
-        phone_last4 = row[3][-4:] if len(row[3]) >= 4 else row[3]
-        cert_number = generate_certificate_number(row[2], row[5], phone_last4)
         return jsonify({
             'found': True,
             'participant': {
                 '姓名': row[0],
                 '赛区': row[1],
-                '手机号': row[3],
-                '所在单位': row[4],
-                '证书编号': cert_number
+                '手机号': row[2],
+                '所在单位': row[3],
+                '证书编号': row[4] if row[4] else ''
             }
         })
     else:
@@ -318,57 +313,6 @@ def clear_templates():
     conn.close()
 
     return jsonify({'success': True})
-
-
-# ==================== 从服务器读取 Excel 接口 ====================
-
-@app.route('/api/load-excel', methods=['GET'])
-def load_excel():
-    """从服务器读取 Excel 文件"""
-    try:
-        # 检查文件是否存在
-        if not os.path.exists('法律英语大赛网站测试.xlsx'):
-            return jsonify({'success': False, 'error': 'Excel文件不存在，请上传文件到服务器'})
-
-        wb = load_workbook('法律英语大赛网站测试.xlsx')
-        ws = wb.active
-
-        # 获取表头（第一行）
-        headers = []
-        for cell in ws[1]:
-            headers.append(cell.value if cell.value else '')
-
-        # 找到各列的索引
-        name_idx = 1
-        region_idx = 2
-        phone_idx = 3
-        org_idx = 4
-
-        for i, h in enumerate(headers):
-            if h and '姓名' in str(h):
-                name_idx = i
-            elif h and '赛区' in str(h):
-                region_idx = i
-            elif h and '手机' in str(h):
-                phone_idx = i
-            elif h and ('单位' in str(h) or '学校' in str(h)):
-                org_idx = i
-
-        # 读取数据（从第二行开始）
-        participants = []
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if row and len(row) > name_idx and row[name_idx]:  # 如果姓名不为空
-                participants.append({
-                    '姓名': str(row[name_idx]) if row[name_idx] else '',
-                    '赛区': str(row[region_idx]) if len(row) > region_idx and row[region_idx] else '',
-                    '手机号': str(row[phone_idx]) if len(row) > phone_idx and row[phone_idx] else '',
-                    '所在单位': str(row[org_idx]) if len(row) > org_idx and row[org_idx] else ''
-                })
-
-        wb.close()
-        return jsonify({'success': True, 'data': participants, 'count': len(participants)})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
 
 
 # ==================== 页面路由 ====================
