@@ -4,6 +4,7 @@ import sqlite3
 import base64
 from datetime import datetime
 import os
+import json
 
 app = Flask(__name__, static_url_path='', static_folder='.')
 CORS(app)
@@ -61,17 +62,30 @@ def init_db():
         if 'created_at' not in columns:
             c.execute("ALTER TABLE participants ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
 
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS templates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cert_type TEXT NOT NULL,
-            region TEXT NOT NULL,
-            award_level TEXT DEFAULT '',
-            filename TEXT NOT NULL,
-            pdf_data TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
+    # 检查 templates 表
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='templates'")
+    templates_exists = c.fetchone()
+
+    if not templates_exists:
+        c.execute('''
+            CREATE TABLE templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cert_type TEXT NOT NULL,
+                region TEXT NOT NULL,
+                award_level TEXT DEFAULT '',
+                filename TEXT NOT NULL,
+                pdf_data TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        print("创建 templates 表")
+    else:
+        # 检查 templates 表是否有 award_level 字段
+        c.execute("PRAGMA table_info(templates)")
+        columns = [col[1] for col in c.fetchall()]
+        if 'award_level' not in columns:
+            c.execute("ALTER TABLE templates ADD COLUMN award_level TEXT DEFAULT ''")
+            print("添加 award_level 字段到 templates 表")
 
     conn.commit()
     conn.close()
@@ -87,9 +101,20 @@ init_db()
 def get_participants():
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-    c.execute(
-        'SELECT id, name, region, phone, organization, certificate_number, award_level, cert_type FROM participants ORDER BY id')
-    rows = c.fetchall()
+    try:
+        c.execute(
+            'SELECT id, name, region, phone, organization, certificate_number, award_level, cert_type FROM participants ORDER BY id')
+        rows = c.fetchall()
+    except sqlite3.OperationalError:
+        # 如果表不存在或字段不完整，重新初始化
+        conn.close()
+        init_db()
+        conn = sqlite3.connect('data.db')
+        c = conn.cursor()
+        c.execute(
+            'SELECT id, name, region, phone, organization, certificate_number, award_level, cert_type FROM participants ORDER BY id')
+        rows = c.fetchall()
+
     conn.close()
 
     participants = []
@@ -133,11 +158,14 @@ def upload_participants():
             certificate_number = p.get('证书编号', '')
             award_level = p.get('奖项等级', '')
 
-            c.execute('''
-                INSERT INTO participants (name, region, region_code, phone, organization, certificate_number, award_level, cert_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (name, region, region_code, phone, organization, certificate_number, award_level, cert_type))
-            total_count += 1
+            try:
+                c.execute('''
+                    INSERT INTO participants (name, region, region_code, phone, organization, certificate_number, award_level, cert_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (name, region, region_code, phone, organization, certificate_number, award_level, cert_type))
+                total_count += 1
+            except Exception as e:
+                print(f"插入失败: {e}, 数据: {p}")
 
     conn.commit()
     conn.close()
@@ -170,11 +198,22 @@ def query_participant():
 
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-    c.execute('''
-        SELECT name, region, phone, organization, certificate_number FROM participants
-        WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND (cert_type = '' OR cert_type = 'participation')
-    ''', (name, region, phone, organization))
-    row = c.fetchone()
+    try:
+        c.execute('''
+            SELECT name, region, phone, organization, certificate_number FROM participants
+            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND (cert_type = '' OR cert_type = 'participation')
+        ''', (name, region, phone, organization))
+        row = c.fetchone()
+    except sqlite3.OperationalError:
+        conn.close()
+        init_db()
+        conn = sqlite3.connect('data.db')
+        c = conn.cursor()
+        c.execute('''
+            SELECT name, region, phone, organization, certificate_number FROM participants
+            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND (cert_type = '' OR cert_type = 'participation')
+        ''', (name, region, phone, organization))
+        row = c.fetchone()
     conn.close()
 
     if row:
@@ -203,11 +242,22 @@ def query_participant_with_award():
 
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-    c.execute('''
-        SELECT name, region, phone, organization, certificate_number, award_level FROM participants
-        WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND cert_type = ?
-    ''', (name, region, phone, organization, cert_type))
-    row = c.fetchone()
+    try:
+        c.execute('''
+            SELECT name, region, phone, organization, certificate_number, award_level FROM participants
+            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND cert_type = ?
+        ''', (name, region, phone, organization, cert_type))
+        row = c.fetchone()
+    except sqlite3.OperationalError:
+        conn.close()
+        init_db()
+        conn = sqlite3.connect('data.db')
+        c = conn.cursor()
+        c.execute('''
+            SELECT name, region, phone, organization, certificate_number, award_level FROM participants
+            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND cert_type = ?
+        ''', (name, region, phone, organization, cert_type))
+        row = c.fetchone()
     conn.close()
 
     if row:
@@ -232,8 +282,16 @@ def query_participant_with_award():
 def get_templates():
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-    c.execute('SELECT cert_type, region, award_level, filename, pdf_data FROM templates')
-    rows = c.fetchall()
+    try:
+        c.execute('SELECT cert_type, region, award_level, filename, pdf_data FROM templates')
+        rows = c.fetchall()
+    except sqlite3.OperationalError:
+        conn.close()
+        init_db()
+        conn = sqlite3.connect('data.db')
+        c = conn.cursor()
+        c.execute('SELECT cert_type, region, award_level, filename, pdf_data FROM templates')
+        rows = c.fetchall()
     conn.close()
 
     templates = {
@@ -245,26 +303,28 @@ def get_templates():
     for row in rows:
         cert_type = row[0]
         region = row[1]
-        award_level = row[2]
+        award_level = row[2] if row[2] else ''
+        filename = row[3]
+        pdf_data = row[4]
 
         if cert_type == 'preliminary':
             if region not in templates[cert_type]:
                 templates[cert_type][region] = {}
             templates[cert_type][region][award_level] = {
-                'filename': row[3],
-                'pdf_data': row[4]
+                'filename': filename,
+                'pdf_data': pdf_data
             }
         elif cert_type == 'final':
             if region not in templates[cert_type]:
                 templates[cert_type][region] = {}
             templates[cert_type][region][award_level] = {
-                'filename': row[3],
-                'pdf_data': row[4]
+                'filename': filename,
+                'pdf_data': pdf_data
             }
-        else:
+        else:  # participation
             templates[cert_type][region] = {
-                'filename': row[3],
-                'pdf_data': row[4]
+                'filename': filename,
+                'pdf_data': pdf_data
             }
 
     return jsonify(templates)
@@ -283,21 +343,32 @@ def upload_template():
     filename = data.get('filename')
     pdf_data = data.get('pdf_data')
 
+    if not cert_type or not region or not filename or not pdf_data:
+        return jsonify({'success': False, 'error': '缺少必要字段'}), 400
+
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
 
-    c.execute('DELETE FROM templates WHERE cert_type = ? AND region = ? AND award_level = ?',
-              (cert_type, region, award_level))
+    try:
+        # 删除旧的同类型同赛区同奖项模板
+        c.execute('DELETE FROM templates WHERE cert_type = ? AND region = ? AND award_level = ?',
+                  (cert_type, region, award_level))
 
-    c.execute('''
-        INSERT INTO templates (cert_type, region, award_level, filename, pdf_data)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (cert_type, region, award_level, filename, pdf_data))
+        # 插入新模板
+        c.execute('''
+            INSERT INTO templates (cert_type, region, award_level, filename, pdf_data)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (cert_type, region, award_level, filename, pdf_data))
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+        result = {'success': True}
+    except Exception as e:
+        print(f"上传模板错误: {e}")
+        result = {'success': False, 'error': str(e)}
+    finally:
+        conn.close()
 
-    return jsonify({'success': True})
+    return jsonify(result)
 
 
 @app.route('/api/templates/batch_upload', methods=['POST'])
@@ -332,18 +403,22 @@ def batch_upload_templates():
                 errors.append(f"缺少必要字段: {filename}")
                 continue
 
+            # 删除旧的同类型同赛区同奖项模板
             c.execute('DELETE FROM templates WHERE cert_type = ? AND region = ? AND award_level = ?',
                       (cert_type, region, award_level))
 
+            # 插入新模板
             c.execute('''
                 INSERT INTO templates (cert_type, region, award_level, filename, pdf_data)
                 VALUES (?, ?, ?, ?, ?)
             ''', (cert_type, region, award_level, filename, pdf_data))
             success_count += 1
+            print(f"成功上传: {filename}")
 
         except Exception as e:
             fail_count += 1
             errors.append(f"{template.get('filename', 'unknown')}: {str(e)}")
+            print(f"上传失败: {template.get('filename', 'unknown')} - {e}")
 
     conn.commit()
     conn.close()
