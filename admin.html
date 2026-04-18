@@ -646,10 +646,17 @@
         // 2. 赛区编码（2位）
         const regionCode = regionCodeMap[region] || "00";
 
-        // 直接使用 Excel 中的原值，不做补零处理
+        // 直接使用原始值（保持原样，不再转为数字）
         let serialValue = regionSerial;
         if (serialValue === null || serialValue === undefined) {
             serialValue = "";
+        }
+
+        // 如果是数字，转为字符串并补零；如果是字符串，直接使用
+        let serialStr = String(serialValue);
+        // 如果字符串全是数字且长度小于3，补零到3位
+        if (/^\d+$/.test(serialStr) && serialStr.length < 3) {
+            serialStr = serialStr.padStart(3, '0');
         }
 
         // 4. 手机号后4位
@@ -767,7 +774,7 @@
     };
 
     // ========== Excel 导入处理（强制第1列为序号，不读取表头） ==========
-    function handleExcelFile(file) {
+        function handleExcelFile(file) {
         const reader = new FileReader();
         reader.onload = async function(e) {
             try {
@@ -781,54 +788,42 @@
                     return;
                 }
 
-                // 强制列索引：第1列(索引0)=序号，第2列(索引1)=姓名，第3列(索引2)=赛区，第4列(索引3)=手机号，第5列(索引4)=单位
-                const serialIdx = 0;   // 第1列：序号
-                const nameIdx = 1;      // 第2列：姓名
-                const regionIdx = 2;    // 第3列：赛区
-                const phoneIdx = 3;     // 第4列：手机号
-                const orgIdx = 4;       // 第5列：所在单位
+                // 强制列索引
+                const serialIdx = 0;
+                const nameIdx = 1;
+                const regionIdx = 2;
+                const phoneIdx = 3;
+                const orgIdx = 4;
 
                 const participants = [];
 
-                // 跳过第一行表头，从第2行开始读取
                 for (let i = 1; i < rows.length; i++) {
                     const row = rows[i];
 
-                    // 直接按索引读取
-                    const regionSerialRaw = row[serialIdx];
+                    const serialValue = row[serialIdx] !== undefined ? String(row[serialIdx]).trim() : '';
                     const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
                     const region = row[regionIdx] ? String(row[regionIdx]).trim() : '';
                     const phone = row[phoneIdx] ? String(row[phoneIdx]).trim() : '';
                     const org = row[orgIdx] ? String(row[orgIdx]).trim() : '';
 
-                    console.log(`第${i}行: 原始序号=${regionSerialRaw}, 姓名=${name}, 赛区=${region}, 手机=${phone}`);
+                    console.log(`第${i}行: 序号="${serialValue}", 姓名=${name}, 赛区=${region}, 手机=${phone}`);
 
-                    if (name && region && phone && org) {
-                        // 处理序号：转为数字
-                        let serialNum = Number(regionSerialRaw);
-                        if (isNaN(serialNum)) serialNum = 0;
-
-                        // 生成证书编号
-                        const certificateNumber = generateCertificateNumber(serialNum, region, phone);
+                    if (name && region && phone && org && serialValue) {
+                        const certificateNumber = generateCertificateNumber(serialValue, region, phone);
 
                         participants.push({
                             姓名: name,
                             赛区: region,
                             手机号: phone,
                             所在单位: org,
-                            赛区序号: serialNum,
+                            赛区序号: serialValue,
                             证书编号: certificateNumber
                         });
                     }
                 }
 
-                console.log(`共解析 ${participants.length} 条数据`);
-                if (participants.length > 0) {
-                    console.log("第一条数据:", participants[0]);
-                }
-
                 if (participants.length === 0) {
-                    alert("没有解析到有效数据，请确保Excel格式：\n第1列=序号\n第2列=姓名\n第3列=赛区\n第4列=手机号\n第5列=所在单位");
+                    alert("没有解析到有效数据");
                     return;
                 }
 
