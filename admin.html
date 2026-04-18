@@ -524,6 +524,15 @@
 
     async function uploadParticipantsToServer(participants) {
         try {
+             // 先尝试清空旧数据
+            try {
+                await fetch('/api/participants/clear', {
+                    method: 'POST',
+                    headers: { 'X-Admin-Key': ADMIN_KEY }
+                });
+            } catch(e) { console.log("清空失败，尝试直接覆盖"); }
+
+            // 上传新数据
             const res = await fetch('/api/participants/upload', {
                 method: 'POST',
                 headers: {
