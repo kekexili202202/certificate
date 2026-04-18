@@ -45,6 +45,8 @@ def init_db():
                 phone TEXT NOT NULL,
                 organization TEXT NOT NULL,
                 certificate_number TEXT DEFAULT '',
+                award_level TEXT DEFAULT '',
+                cert_type TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -62,6 +64,14 @@ def init_db():
             c.execute("ALTER TABLE participants ADD COLUMN certificate_number TEXT DEFAULT ''")
             print("添加 certificate_number 字段")
 
+        if 'award_level' not in columns:
+            c.execute("ALTER TABLE participants ADD COLUMN award_level TEXT DEFAULT ''")
+            print("添加 award_level 字段")
+
+        if 'cert_type' not in columns:
+            c.execute("ALTER TABLE participants ADD COLUMN cert_type TEXT DEFAULT ''")
+            print("添加 cert_type 字段")
+
         if 'created_at' not in columns:
             c.execute("ALTER TABLE participants ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             print("添加 created_at 字段")
@@ -72,6 +82,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             cert_type TEXT NOT NULL,
             region TEXT NOT NULL,
+            award_level TEXT DEFAULT '',
             filename TEXT NOT NULL,
             pdf_data TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -95,7 +106,8 @@ def get_participants():
     c = conn.cursor()
 
     try:
-        c.execute('SELECT id, name, region, phone, organization, certificate_number FROM participants ORDER BY id')
+        c.execute(
+            'SELECT id, name, region, phone, organization, certificate_number, award_level, cert_type FROM participants ORDER BY id')
         rows = c.fetchall()
     except sqlite3.OperationalError as e:
         print(f"查询失败: {e}，重新初始化数据库...")
@@ -103,7 +115,8 @@ def get_participants():
         init_db()
         conn = sqlite3.connect('data.db')
         c = conn.cursor()
-        c.execute('SELECT id, name, region, phone, organization, certificate_number FROM participants ORDER BY id')
+        c.execute(
+            'SELECT id, name, region, phone, organization, certificate_number, award_level, cert_type FROM participants ORDER BY id')
         rows = c.fetchall()
 
     conn.close()
@@ -116,20 +129,22 @@ def get_participants():
             '赛区': row[2],
             '手机号': row[3],
             '所在单位': row[4],
-            '证书编号': row[5] if row[5] else ''
+            '证书编号': row[5] if row[5] else '',
+            '奖项等级': row[6] if row[6] else '',
+            '证书类型': row[7] if row[7] else ''
         })
     return jsonify(participants)
 
 
 @app.route('/api/participants/upload', methods=['POST'])
 def upload_participants():
-    """上传选手数据（直接使用Excel中的证书编号）"""
+    """上传选手数据（支持多个sheet）"""
     key = request.headers.get('X-Admin-Key')
     if key != ADMIN_KEY:
         return jsonify({'error': '无权操作'}), 401
 
     data = request.json
-    participants = data.get('participants', [])
+    sheets_data = data.get('sheets', {})
 
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
@@ -137,24 +152,29 @@ def upload_participants():
     # 清空原有数据
     c.execute('DELETE FROM participants')
 
-    # 插入新数据，直接使用Excel中的证书编号
-    for p in participants:
-        name = p.get('姓名', '')
-        region = p.get('赛区', '')
-        region_code = REGION_CODE.get(region, '00')
-        phone = p.get('手机号', '')
-        organization = p.get('所在单位', '')
-        certificate_number = p.get('证书编号', '')
+    total_count = 0
 
-        c.execute('''
-            INSERT INTO participants (name, region, region_code, phone, organization, certificate_number)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (name, region, region_code, phone, organization, certificate_number))
+    # 处理每个sheet的数据
+    for cert_type, participants in sheets_data.items():
+        for p in participants:
+            name = p.get('姓名', '')
+            region = p.get('赛区', '')
+            region_code = REGION_CODE.get(region, '00')
+            phone = p.get('手机号', '')
+            organization = p.get('所在单位', '')
+            certificate_number = p.get('证书编号', '')
+            award_level = p.get('奖项等级', '')  # 预赛和决赛专用
+
+            c.execute('''
+                INSERT INTO participants (name, region, region_code, phone, organization, certificate_number, award_level, cert_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (name, region, region_code, phone, organization, certificate_number, award_level, cert_type))
+            total_count += 1
 
     conn.commit()
     conn.close()
 
-    return jsonify({'success': True, 'count': len(participants)})
+    return jsonify({'success': True, 'count': total_count})
 
 
 @app.route('/api/participants/clear', methods=['DELETE', 'POST'])
@@ -175,7 +195,7 @@ def clear_participants():
 
 @app.route('/api/participants/query', methods=['POST'])
 def query_participant():
-    """查询选手信息（直接返回数据库中的证书编号）"""
+    """查询选手信息（参赛证明）"""
     data = request.json
     name = data.get('name', '').strip()
     region = data.get('region', '').strip()
@@ -188,7 +208,7 @@ def query_participant():
     try:
         c.execute('''
             SELECT name, region, phone, organization, certificate_number FROM participants
-            WHERE name = ? AND region = ? AND phone = ? AND organization = ?
+            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND (cert_type = '' OR cert_type = 'participation')
         ''', (name, region, phone, organization))
         row = c.fetchone()
     except sqlite3.OperationalError as e:
@@ -199,7 +219,7 @@ def query_participant():
         c = conn.cursor()
         c.execute('''
             SELECT name, region, phone, organization, certificate_number FROM participants
-            WHERE name = ? AND region = ? AND phone = ? AND organization = ?
+            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND (cert_type = '' OR cert_type = 'participation')
         ''', (name, region, phone, organization))
         row = c.fetchone()
 
@@ -220,6 +240,55 @@ def query_participant():
         return jsonify({'found': False})
 
 
+@app.route('/api/participants/query_with_award', methods=['POST'])
+def query_participant_with_award():
+    """查询选手信息（包含奖项等级，用于预赛和决赛）"""
+    data = request.json
+    name = data.get('name', '').strip()
+    region = data.get('region', '').strip()
+    phone = data.get('phone', '').strip()
+    organization = data.get('organization', '').strip()
+    cert_type = data.get('cert_type', '').strip()
+
+    conn = sqlite3.connect('data.db')
+    c = conn.cursor()
+
+    try:
+        c.execute('''
+            SELECT name, region, phone, organization, certificate_number, award_level FROM participants
+            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND cert_type = ?
+        ''', (name, region, phone, organization, cert_type))
+        row = c.fetchone()
+    except sqlite3.OperationalError as e:
+        print(f"查询失败: {e}，重新初始化数据库...")
+        conn.close()
+        init_db()
+        conn = sqlite3.connect('data.db')
+        c = conn.cursor()
+        c.execute('''
+            SELECT name, region, phone, organization, certificate_number, award_level FROM participants
+            WHERE name = ? AND region = ? AND phone = ? AND organization = ? AND cert_type = ?
+        ''', (name, region, phone, organization, cert_type))
+        row = c.fetchone()
+
+    conn.close()
+
+    if row:
+        return jsonify({
+            'found': True,
+            'participant': {
+                '姓名': row[0],
+                '赛区': row[1],
+                '手机号': row[2],
+                '所在单位': row[3],
+                '证书编号': row[4] if row[4] else '',
+                '奖项等级': row[5] if row[5] else ''
+            }
+        })
+    else:
+        return jsonify({'found': False})
+
+
 # ==================== 模板管理接口 ====================
 
 @app.route('/api/templates', methods=['GET'])
@@ -227,7 +296,7 @@ def get_templates():
     """获取所有模板"""
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-    c.execute('SELECT cert_type, region, filename, pdf_data FROM templates')
+    c.execute('SELECT cert_type, region, award_level, filename, pdf_data FROM templates')
     rows = c.fetchall()
     conn.close()
 
@@ -240,17 +309,34 @@ def get_templates():
     for row in rows:
         cert_type = row[0]
         region = row[1]
-        templates[cert_type][region] = {
-            'filename': row[2],
-            'pdf_data': row[3]
-        }
+        award_level = row[2]
+
+        if cert_type == 'preliminary':
+            if region not in templates[cert_type]:
+                templates[cert_type][region] = {}
+            templates[cert_type][region][award_level] = {
+                'filename': row[3],
+                'pdf_data': row[4]
+            }
+        elif cert_type == 'final':
+            if region not in templates[cert_type]:
+                templates[cert_type][region] = {}
+            templates[cert_type][region][award_level] = {
+                'filename': row[3],
+                'pdf_data': row[4]
+            }
+        else:
+            templates[cert_type][region] = {
+                'filename': row[3],
+                'pdf_data': row[4]
+            }
 
     return jsonify(templates)
 
 
 @app.route('/api/templates/upload', methods=['POST'])
 def upload_template():
-    """上传模板"""
+    """上传模板（支持奖项等级）"""
     key = request.headers.get('X-Admin-Key')
     if key != ADMIN_KEY:
         return jsonify({'error': '无权操作'}), 401
@@ -258,20 +344,22 @@ def upload_template():
     data = request.json
     cert_type = data.get('cert_type')
     region = data.get('region')
+    award_level = data.get('award_level', '')
     filename = data.get('filename')
     pdf_data = data.get('pdf_data')
 
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
 
-    # 删除旧的同类型同赛区模板
-    c.execute('DELETE FROM templates WHERE cert_type = ? AND region = ?', (cert_type, region))
+    # 删除旧的同类型同赛区同奖项模板
+    c.execute('DELETE FROM templates WHERE cert_type = ? AND region = ? AND award_level = ?',
+              (cert_type, region, award_level))
 
     # 插入新模板
     c.execute('''
-        INSERT INTO templates (cert_type, region, filename, pdf_data)
-        VALUES (?, ?, ?, ?)
-    ''', (cert_type, region, filename, pdf_data))
+        INSERT INTO templates (cert_type, region, award_level, filename, pdf_data)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (cert_type, region, award_level, filename, pdf_data))
 
     conn.commit()
     conn.close()
@@ -289,10 +377,12 @@ def delete_template():
     data = request.json
     cert_type = data.get('cert_type')
     region = data.get('region')
+    award_level = data.get('award_level', '')
 
     conn = sqlite3.connect('data.db')
     c = conn.cursor()
-    c.execute('DELETE FROM templates WHERE cert_type = ? AND region = ?', (cert_type, region))
+    c.execute('DELETE FROM templates WHERE cert_type = ? AND region = ? AND award_level = ?',
+              (cert_type, region, award_level))
     conn.commit()
     conn.close()
 

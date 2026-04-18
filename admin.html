@@ -386,7 +386,7 @@
                 <button class="upload-template-btn" onclick="uploadTemplate('final')"><i class="fas fa-upload"></i> 上传决赛获奖模板</button>
             </div>
             <div><button class="clear-all-btn" id="clearAllTemplatesBtn"><i class="fas fa-trash-alt"></i> 清空所有模板</button></div>
-            <div class="admin-note"><i class="fas fa-info-circle"></i> 模板命名需包含赛区名称，如"华北及东北赛区参赛证明.pdf"<br>支持的赛区：华北及东北赛区、西北赛区、西南赛区、华东赛区、华南赛区</div>
+            <div class="admin-note"><i class="fas fa-info-circle"></i> 模板命名需包含赛区名称和奖项等级<br>支持的赛区：华北及东北赛区、西北赛区、西南赛区、华东赛区、华南赛区<br>预赛/决赛模板示例：华北及东北赛区预赛一等奖.pdf、华北及东北赛区决赛二等奖.pdf</div>
         </div>
     </div>
 
@@ -476,26 +476,20 @@
         });
     }
 
-    async function loadTemplatesFromFolder() {
-        console.log("开始加载模板...");
-        const regions = ["华北及东北赛区", "华东赛区", "华南赛区", "西南赛区", "西北赛区"];
-        pdfTemplates = {};
-        for (const region of regions) {
-            const fileName = `${region}参赛证明.pdf`;
-            const fileUrl = `/templates_pdf/${encodeURIComponent(fileName)}`;
-            try {
-                const response = await fetch(fileUrl);
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const blobUrl = URL.createObjectURL(blob);
-                    pdfTemplates[region] = { url: blobUrl, name: fileName };
-                    console.log(`✅ 加载模板：${region}`);
-                }
-            } catch (err) {
-                console.error(`加载失败：${fileName}`, err);
-            }
+    async function loadTemplatesFromServer() {
+        try {
+            const res = await fetch('/api/templates');
+            const data = await res.json();
+
+            pdfTemplates = data.participation || {};
+            pdfTemplatesPrelim = data.preliminary || {};
+            pdfTemplatesFinal = data.final || {};
+
+            updateTemplateStatusDisplay();
+            console.log("模板加载完成:", { pdfTemplates, pdfTemplatesPrelim, pdfTemplatesFinal });
+        } catch (err) {
+            console.error('加载模板失败', err);
         }
-        updateTemplateStatusDisplay();
     }
 
     async function loadParticipantsFromServer() {
@@ -523,21 +517,18 @@
         });
     }
 
-    async function uploadParticipantsToServer(participants) {
+    async function uploadParticipantsToServer(sheets_data) {
         try {
-            console.log("准备上传", participants.length, "条数据");
-
             const res = await fetch('/api/participants/upload', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Admin-Key': ADMIN_KEY
                 },
-                body: JSON.stringify({ participants: participants })
+                body: JSON.stringify({ sheets: sheets_data })
             });
 
             const data = await res.json();
-            console.log("上传响应:", data);
 
             if (data.success) {
                 alert(`成功导入 ${data.count} 条数据到数据库`);
@@ -554,7 +545,7 @@
         }
     }
 
-    async function uploadTemplateToServer(certType, region, file) {
+    async function uploadTemplateToServer(certType, region, awardLevel, file) {
         const base64 = await blobToBase64(file);
         try {
             const res = await fetch('/api/templates/upload', {
@@ -566,13 +557,14 @@
                 body: JSON.stringify({
                     cert_type: certType,
                     region: region,
+                    award_level: awardLevel,
                     filename: file.name,
                     pdf_data: base64
                 })
             });
             const data = await res.json();
             if (data.success) {
-                await loadTemplatesFromFolder();
+                await loadTemplatesFromServer();
                 return true;
             }
             return false;
@@ -582,7 +574,7 @@
         }
     }
 
-    async function deleteTemplateFromServer(certType, region) {
+    async function deleteTemplateFromServer(certType, region, awardLevel) {
         try {
             const res = await fetch('/api/templates/delete', {
                 method: 'DELETE',
@@ -590,11 +582,11 @@
                     'Content-Type': 'application/json',
                     'X-Admin-Key': ADMIN_KEY
                 },
-                body: JSON.stringify({ cert_type: certType, region: region })
+                body: JSON.stringify({ cert_type: certType, region: region, award_level: awardLevel })
             });
             const data = await res.json();
             if (data.success) {
-                await loadTemplatesFromFolder();
+                await loadTemplatesFromServer();
                 return true;
             }
             return false;
@@ -613,7 +605,7 @@
             });
             const data = await res.json();
             if (data.success) {
-                await loadTemplatesFromFolder();
+                await loadTemplatesFromServer();
                 alert('已清空所有模板');
             }
         } catch (err) {
@@ -633,10 +625,18 @@
         }
 
         try {
-            const res = await fetch('/api/participants/query', {
+            let url = '/api/participants/query';
+            let body = { name, region, phone, organization: org };
+
+            if (currentCertType !== 'participation') {
+                url = '/api/participants/query_with_award';
+                body.cert_type = currentCertType;
+            }
+
+            const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, region, phone, organization: org })
+                body: JSON.stringify(body)
             });
             const data = await res.json();
 
@@ -644,7 +644,7 @@
                 showError("", false);
                 await generateCertificate(data.participant);
             } else {
-                showError(`未查找到您的信息，请核对`, true);
+                showError(`未查找到您的${currentCertType === 'participation' ? '参赛信息' : (currentCertType === 'preliminary' ? '预赛获奖信息' : '决赛获奖信息')}，请核对`, true);
                 document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><i class="fas fa-search"></i><p>未查找到您的信息</p></div>`;
             }
         } catch (err) {
@@ -661,25 +661,67 @@
 
     function updateTemplateStatusDisplay() {
         const pc = Object.keys(pdfTemplates).length;
-        document.getElementById('templateStatus').innerHTML = pc > 0 ? `<i class="fas fa-check-circle"></i> 已加载 ${pc} 个模板` : `<i class="fas fa-file-pdf"></i> 暂无模板`;
+        let preCount = 0;
+        for (const region in pdfTemplatesPrelim) {
+            preCount += Object.keys(pdfTemplatesPrelim[region]).length;
+        }
+        let finalCount = 0;
+        for (const region in pdfTemplatesFinal) {
+            finalCount += Object.keys(pdfTemplatesFinal[region]).length;
+        }
 
+        document.getElementById('templateStatus').innerHTML = `<i class="fas fa-check-circle"></i> 参赛:${pc} 预赛:${preCount} 决赛:${finalCount}`;
+
+        // 更新参赛证明模板显示
         const participationContainer = document.getElementById('participationTemplateList');
         if (participationContainer) {
             if (pc > 0) {
                 let html = '';
                 for (const [region, data] of Object.entries(pdfTemplates)) {
-                    html += `<div class="template-item"><div class="template-info"><span class="template-badge participation">参赛证明</span><span>📄 ${region}</span></div><button class="delete-btn" onclick="deleteTemplate('participation', '${region}')">删除</button></div>`;
+                    html += `<div class="template-item"><div class="template-info"><span class="template-badge participation">参赛证明</span><span>📄 ${region}</span></div><button class="delete-btn" onclick="deleteTemplate('participation', '${region}', '')">删除</button></div>`;
                 }
                 participationContainer.innerHTML = html;
             } else {
                 participationContainer.innerHTML = '<div class="empty-templates">暂无参赛证明模板</div>';
             }
         }
+
+        // 更新预赛获奖模板显示
+        const preliminaryContainer = document.getElementById('preliminaryTemplateList');
+        if (preliminaryContainer) {
+            if (preCount > 0) {
+                let html = '';
+                for (const [region, awards] of Object.entries(pdfTemplatesPrelim)) {
+                    for (const [level, data] of Object.entries(awards)) {
+                        html += `<div class="template-item"><div class="template-info"><span class="template-badge preliminary">预赛${level}</span><span>📄 ${region}</span></div><button class="delete-btn" onclick="deleteTemplate('preliminary', '${region}', '${level}')">删除</button></div>`;
+                    }
+                }
+                preliminaryContainer.innerHTML = html;
+            } else {
+                preliminaryContainer.innerHTML = '<div class="empty-templates">暂无预赛获奖模板</div>';
+            }
+        }
+
+        // 更新决赛获奖模板显示
+        const finalContainer = document.getElementById('finalTemplateList');
+        if (finalContainer) {
+            if (finalCount > 0) {
+                let html = '';
+                for (const [region, awards] of Object.entries(pdfTemplatesFinal)) {
+                    for (const [level, data] of Object.entries(awards)) {
+                        html += `<div class="template-item"><div class="template-info"><span class="template-badge final">决赛${level}</span><span>📄 ${region}</span></div><button class="delete-btn" onclick="deleteTemplate('final', '${region}', '${level}')">删除</button></div>`;
+                    }
+                }
+                finalContainer.innerHTML = html;
+            } else {
+                finalContainer.innerHTML = '<div class="empty-templates">暂无决赛获奖模板</div>';
+            }
+        }
     }
 
-    window.deleteTemplate = async function(certType, region) {
-        if (confirm(`确定删除 ${region} 的模板吗？`)) {
-            await deleteTemplateFromServer(certType, region);
+    window.deleteTemplate = async function(certType, region, awardLevel) {
+        if (confirm(`确定删除 ${region} ${awardLevel ? awardLevel : ''} 的模板吗？`)) {
+            await deleteTemplateFromServer(certType, region, awardLevel);
         }
     };
 
@@ -697,9 +739,29 @@
                     alert(`无法识别赛区，文件名需包含：${validRegions.join(', ')}`);
                     return;
                 }
-                const success = await uploadTemplateToServer(pendingCertType, region, file);
+
+                let awardLevel = '';
+                if (certType === 'preliminary') {
+                    if (file.name.includes('一等奖')) awardLevel = '一等奖';
+                    else if (file.name.includes('二等奖')) awardLevel = '二等奖';
+                    else if (file.name.includes('三等奖')) awardLevel = '三等奖';
+                    else {
+                        alert('预赛证书文件名需包含奖项等级：一等奖、二等奖、三等奖');
+                        return;
+                    }
+                } else if (certType === 'final') {
+                    if (file.name.includes('一等奖')) awardLevel = '一等奖';
+                    else if (file.name.includes('二等奖')) awardLevel = '二等奖';
+                    else if (file.name.includes('三等奖')) awardLevel = '三等奖';
+                    else {
+                        alert('决赛证书文件名需包含奖项等级：一等奖、二等奖、三等奖');
+                        return;
+                    }
+                }
+
+                const success = await uploadTemplateToServer(pendingCertType, region, awardLevel, file);
                 if (success) {
-                    alert(`✅ 成功添加 ${region} 的模板`);
+                    alert(`✅ 成功添加 ${region} ${awardLevel ? awardLevel : ''} 的模板`);
                 } else {
                     alert('上传失败');
                 }
@@ -708,64 +770,76 @@
         input.click();
     };
 
-        // ========== Excel 导入处理 ==========
-    // 读取列：B=姓名, C=赛区, D=手机号, E=所在单位, G=证书编号
-    // 不读取A列（赛区序号）
+    // ========== Excel 导入处理 ==========
     function handleExcelFile(file) {
         const reader = new FileReader();
         reader.onload = async function(e) {
             try {
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
-                const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
-                if (!rows.length || rows.length < 2) {
-                    alert("Excel无数据");
-                    return;
-                }
+                const sheets_data = {
+                    'participation': [],
+                    'preliminary': [],
+                    'final': []
+                };
 
-                // 列索引：A=0, B=1, C=2, D=3, E=4, F=5(公式), G=6
-                const nameIdx = 1;       // B列：姓名
-                const regionIdx = 2;     // C列：赛区
-                const phoneIdx = 3;      // D列：手机号
-                const orgIdx = 4;        // E列：所在单位
-                const certIdx = 6;       // G列：证书编号
+                // 处理每个sheet
+                for (const sheetName of workbook.SheetNames) {
+                    let cert_type = '';
+                    if (sheetName.includes('参赛证明')) cert_type = 'participation';
+                    else if (sheetName.includes('预赛')) cert_type = 'preliminary';
+                    else if (sheetName.includes('决赛')) cert_type = 'final';
+                    else continue;
 
-                const participants = [];
+                    const sheet = workbook.Sheets[sheetName];
+                    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
-                for (let i = 1; i < rows.length; i++) {
-                    const row = rows[i];
+                    if (!rows.length || rows.length < 2) continue;
 
-                    const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
-                    const region = row[regionIdx] ? String(row[regionIdx]).trim() : '';
-                    const phone = row[phoneIdx] ? String(row[phoneIdx]).trim() : '';
-                    const org = row[orgIdx] ? String(row[orgIdx]).trim() : '';
-                    const certificateNumber = row[certIdx] ? String(row[certIdx]).trim() : '';
+                    // 列索引：B=姓名, C=赛区, D=手机号, E=所在单位, G=证书编号, H=奖项等级（预赛/决赛）
+                    const nameIdx = 1;
+                    const regionIdx = 2;
+                    const phoneIdx = 3;
+                    const orgIdx = 4;
+                    const certIdx = 6;
+                    const awardIdx = 7;
 
-                    console.log(`第${i}行: 姓名=${name}, 赛区=${region}, 手机=${phone}, 单位=${org}, 证书编号=${certificateNumber}`);
+                    for (let i = 1; i < rows.length; i++) {
+                        const row = rows[i];
+                        const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
+                        const region = row[regionIdx] ? String(row[regionIdx]).trim() : '';
+                        const phone = row[phoneIdx] ? String(row[phoneIdx]).trim() : '';
+                        const org = row[orgIdx] ? String(row[orgIdx]).trim() : '';
+                        const certificateNumber = row[certIdx] ? String(row[certIdx]).trim() : '';
+                        const awardLevel = row[awardIdx] ? String(row[awardIdx]).trim() : '';
 
-                    if (name && region && phone && org && certificateNumber) {
-                        participants.push({
-                            姓名: name,
-                            赛区: region,
-                            手机号: phone,
-                            所在单位: org,
-                            证书编号: certificateNumber
-                        });
-                    } else {
-                        console.warn(`第${i}行数据不完整，跳过: 姓名=${name}, 证书编号=${certificateNumber}`);
+                        if (name && region && phone && org && certificateNumber) {
+                            const participant = {
+                                姓名: name,
+                                赛区: region,
+                                手机号: phone,
+                                所在单位: org,
+                                证书编号: certificateNumber
+                            };
+
+                            if (cert_type === 'preliminary' || cert_type === 'final') {
+                                participant.奖项等级 = awardLevel;
+                            }
+
+                            sheets_data[cert_type].push(participant);
+                        }
                     }
                 }
 
-                console.log(`共解析 ${participants.length} 条有效数据`);
+                const totalCount = sheets_data.participation.length + sheets_data.preliminary.length + sheets_data.final.length;
 
-                if (participants.length === 0) {
-                    alert("没有解析到有效数据，请确保Excel格式：\nB列=姓名\nC列=赛区\nD列=手机号\nE列=所在单位\nG列=证书编号");
+                if (totalCount === 0) {
+                    alert("没有解析到有效数据，请确保Excel格式：\nSheet1:参赛证明\nSheet2:预赛获奖证书\nSheet3:决赛获奖证书\nB列=姓名\nC列=赛区\nD列=手机号\nE列=所在单位\nG列=证书编号\nH列=奖项等级(预赛/决赛专用)");
                     return;
                 }
 
-                await uploadParticipantsToServer(participants);
+                await uploadParticipantsToServer(sheets_data);
 
             } catch (err) {
                 console.error("解析Excel失败:", err);
@@ -776,12 +850,20 @@
     }
 
     async function loadDemoData() {
-        const demoData = [
-            { 姓名: "李思琪", 赛区: "华北及东北赛区", 手机号: "13812348888", 所在单位: "中国政法大学", 赛区序号: "001", 证书编号: "NLEC2026010018888" },
-            { 姓名: "张明", 赛区: "华东赛区", 手机号: "15912345678", 所在单位: "华东政法大学", 赛区序号: "002", 证书编号: "NLEC2026030025678" },
-            { 姓名: "欧阳若曦", 赛区: "华南赛区", 手机号: "18712340000", 所在单位: "中山大学", 赛区序号: "003", 证书编号: "NLEC2026020030000" }
-        ];
-        await uploadParticipantsToServer(demoData);
+        const sheets_data = {
+            'participation': [
+                { 姓名: "李思琪", 赛区: "华北及东北赛区", 手机号: "13812348888", 所在单位: "中国政法大学", 证书编号: "NLEC2026010018888" },
+                { 姓名: "张明", 赛区: "华东赛区", 手机号: "15912345678", 所在单位: "华东政法大学", 证书编号: "NLEC2026030025678" }
+            ],
+            'preliminary': [
+                { 姓名: "欧阳若曦", 赛区: "华南赛区", 手机号: "18712340000", 所在单位: "中山大学", 证书编号: "NLEC2026020030000", 奖项等级: "一等奖" },
+                { 姓名: "王芳", 赛区: "西南赛区", 手机号: "13912345678", 所在单位: "西南政法大学", 证书编号: "NLEC2026040041234", 奖项等级: "二等奖" }
+            ],
+            'final': [
+                { 姓名: "陈明远", 赛区: "西北赛区", 手机号: "15212345678", 所在单位: "西北政法大学", 证书编号: "NLEC2026050055678", 奖项等级: "三等奖" }
+            ]
+        };
+        await uploadParticipantsToServer(sheets_data);
         alert("已加载演示数据！");
     }
 
@@ -864,7 +946,7 @@
     }
 
     async function renderPdfWithNameReplacement(pdfData, name) {
-        const loadingTask = pdfjsLib.getDocument(pdfData.url);
+        const loadingTask = pdfjsLib.getDocument(pdfData.pdf_data ? `data:application/pdf;base64,${pdfData.pdf_data}` : pdfData.url);
         const pdf = await loadingTask.promise;
         const page = await pdf.getPage(1);
         const scale = 3.0;
@@ -880,9 +962,32 @@
         if (!participant) return false;
         const region = participant.赛区;
         let pdfData = null;
-        if (currentCertType === "participation") pdfData = pdfTemplates[region];
-        else if (currentCertType === "preliminary") pdfData = pdfTemplatesPrelim[region];
-        else pdfData = pdfTemplatesFinal[region];
+
+        if (currentCertType === "participation") {
+            pdfData = pdfTemplates[region];
+        } else if (currentCertType === "preliminary") {
+            const awardLevel = participant.奖项等级;
+            if (!awardLevel) {
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到您的奖项等级信息</p></div>`;
+                return false;
+            }
+            pdfData = pdfTemplatesPrelim[region]?.[awardLevel];
+            if (!pdfData) {
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} ${awardLevel} 的预赛模板</p></div>`;
+                return false;
+            }
+        } else {
+            const awardLevel = participant.奖项等级;
+            if (!awardLevel) {
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到您的奖项等级信息</p></div>`;
+                return false;
+            }
+            pdfData = pdfTemplatesFinal[region]?.[awardLevel];
+            if (!pdfData) {
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} ${awardLevel} 的决赛模板</p></div>`;
+                return false;
+            }
+        }
 
         if (!pdfData) {
             document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} 的模板</p></div>`;
@@ -894,7 +999,7 @@
             const canvas = await renderPdfWithNameReplacement(pdfData, participant.姓名);
             currentResultCanvas = canvas;
             const imageUrl = canvas.toDataURL('image/png');
-            const certName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖' : '决赛获奖');
+            const certName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? `预赛${participant.奖项等级}` : `决赛${participant.奖项等级}`);
             const certificateNumber = participant.证书编号 || "生成中";
 
             document.getElementById('certificateRenderArea').innerHTML = `
@@ -907,6 +1012,7 @@
                         <div class="participant-details">
                             <span><i class="fas fa-map-marker-alt"></i> ${escapeHtml(participant.赛区)}</span>
                             <span style="margin-left:1rem;"><i class="fas fa-building"></i> ${escapeHtml(participant.所在单位)}</span>
+                            ${participant.奖项等级 ? `<span style="margin-left:1rem;"><i class="fas fa-trophy"></i> ${escapeHtml(participant.奖项等级)}</span>` : ''}
                         </div>
                     </div>
                     <div class="pdf-container">
@@ -974,7 +1080,7 @@
 
     async function initializeData() {
         console.log("页面启动...");
-        await loadTemplatesFromFolder();
+        await loadTemplatesFromServer();
         await loadParticipantsFromServer();
         console.log("初始化完成");
     }
