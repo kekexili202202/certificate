@@ -319,7 +319,6 @@
         .loading { text-align: center; padding: 2rem; color: #2c5a6e; }
         .loading i { font-size: 2rem; margin-bottom: 1rem; }
 
-        /* 证书编号卡片样式 */
         .participant-info-card {
             background: #faf6ed;
             border-radius: 1rem;
@@ -459,7 +458,6 @@
     const ADMIN_KEY = "admin123456";
     const validRegions = ["华北及东北赛区", "西北赛区", "西南赛区", "华东赛区", "华南赛区"];
 
-    // 赛区编码映射表（2位数字编码）
     const regionCodeMap = {
         "华北及东北赛区": "01",
         "华南赛区": "02",
@@ -468,7 +466,6 @@
         "西北赛区": "05"
     };
 
-    // HTML 转义函数
     function escapeHtml(str) {
         if (!str) return "";
         return str.replace(/[&<>]/g, function(m) {
@@ -479,48 +476,33 @@
         });
     }
 
-    // ========== 直接从 templates_pdf 文件夹加载模板 ==========
     async function loadTemplatesFromFolder() {
-        console.log("开始从 templates_pdf 文件夹加载模板...");
+        console.log("开始加载模板...");
         const regions = ["华北及东北赛区", "华东赛区", "华南赛区", "西南赛区", "西北赛区"];
-
         pdfTemplates = {};
-
         for (const region of regions) {
             const fileName = `${region}参赛证明.pdf`;
             const fileUrl = `/templates_pdf/${encodeURIComponent(fileName)}`;
-
             try {
                 const response = await fetch(fileUrl);
                 if (response.ok) {
                     const blob = await response.blob();
                     const blobUrl = URL.createObjectURL(blob);
                     pdfTemplates[region] = { url: blobUrl, name: fileName };
-                    console.log(`✅ 自动加载模板：${region}`);
-                } else {
-                    console.warn(`⚠️ 未找到模板：${fileName}，状态码：${response.status}`);
+                    console.log(`✅ 加载模板：${region}`);
                 }
             } catch (err) {
                 console.error(`加载失败：${fileName}`, err);
             }
         }
         updateTemplateStatusDisplay();
-        const count = Object.keys(pdfTemplates).length;
-        if (count > 0) {
-            console.log(`已自动加载 ${count} 个参赛证明模板`);
-        } else {
-            console.warn(`⚠️ 未找到任何模板！`);
-        }
     }
 
-    // ========== 从后端数据库加载选手数据 ==========
     async function loadParticipantsFromServer() {
         try {
             const res = await fetch('/api/participants');
             const data = await res.json();
-            const count = data.length;
-            document.getElementById('dataStatus').innerHTML = `<i class="fas fa-check-circle"></i> 已加载 ${count} 条数据`;
-            console.log(`从数据库加载了 ${count} 条选手数据`);
+            document.getElementById('dataStatus').innerHTML = `<i class="fas fa-check-circle"></i> 已加载 ${data.length} 条数据`;
             return data;
         } catch (err) {
             console.error('加载选手数据失败', err);
@@ -540,7 +522,6 @@
         });
     }
 
-    // ========== 上传选手数据到数据库 ==========
     async function uploadParticipantsToServer(participants) {
         try {
             const res = await fetch('/api/participants/upload', {
@@ -553,7 +534,7 @@
             });
             const data = await res.json();
             if (data.success) {
-                alert(`成功导入 ${data.count} 条数据到数据库`);
+                alert(`成功导入 ${data.count} 条数据`);
                 await loadParticipantsFromServer();
                 return true;
             } else {
@@ -568,7 +549,6 @@
 
     async function uploadTemplateToServer(certType, region, file) {
         const base64 = await blobToBase64(file);
-
         try {
             const res = await fetch('/api/templates/upload', {
                 method: 'POST',
@@ -603,10 +583,7 @@
                     'Content-Type': 'application/json',
                     'X-Admin-Key': ADMIN_KEY
                 },
-                body: JSON.stringify({
-                    cert_type: certType,
-                    region: region
-                })
+                body: JSON.stringify({ cert_type: certType, region: region })
             });
             const data = await res.json();
             if (data.success) {
@@ -637,36 +614,27 @@
         }
     }
 
-    // ========== 生成证书编号 ==========
-    // 格式：NLEC + 2026 + 赛区编码(2位) + 赛区序号(3位) + 手机号后4位
+    // ========== 核心：生成证书编号 ==========
     function generateCertificateNumber(regionSerial, region, phone) {
-        // 1. 年份固定为2026
         const year = "2026";
 
-        // 2. 赛区编码（2位）
+        // 处理序号：提取数字部分，补零到3位
+        let serialStr = String(regionSerial).trim();
+        // 提取数字（去除前面的0，保留数字）
+        let numMatch = serialStr.match(/\d+/);
+        let serialNum = numMatch ? parseInt(numMatch[0], 10) : 0;
+        // 补零到3位
+        let serialPadded = String(serialNum).padStart(3, '0');
+
         const regionCode = regionCodeMap[region] || "00";
-
-        // 直接使用原始值（保持原样，不再转为数字）
-        let serialValue = regionSerial;
-        if (serialValue === null || serialValue === undefined) {
-            serialValue = "";
-        }
-
-        // 如果是数字，转为字符串并补零；如果是字符串，直接使用
-        let serialStr = String(serialValue);
-        // 如果字符串全是数字且长度小于3，补零到3位
-        if (/^\d+$/.test(serialStr) && serialStr.length < 3) {
-            serialStr = serialStr.padStart(3, '0');
-        }
-
-        // 4. 手机号后4位
         const phoneLast4 = phone.slice(-4);
 
-        // 5. 组合证书编号
-        return `NLEC${year}${regionCode}${serialValue}${phoneLast4}`;
+        const result = `NLEC${year}${regionCode}${serialPadded}${phoneLast4}`;
+        console.log(`生成: 原始="${regionSerial}" → 数字=${serialNum} → "${serialPadded}", 结果=${result}`);
+
+        return result;
     }
 
-    // ========== 查询功能 ==========
     async function performQuery() {
         const name = document.getElementById('fullname').value;
         const region = document.getElementById('region').value;
@@ -674,7 +642,7 @@
         const org = document.getElementById('organization').value;
 
         if (!name || !region || !phone || !org) {
-            showError("请完整填写姓名、赛区、手机号和所在单位四项信息", true);
+            showError("请完整填写四项信息", true);
             return;
         }
 
@@ -682,12 +650,7 @@
             const res = await fetch('/api/participants/query', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: name,
-                    region: region,
-                    phone: phone,
-                    organization: org
-                })
+                body: JSON.stringify({ name, region, phone, organization: org })
             });
             const data = await res.json();
 
@@ -696,17 +659,14 @@
                 await generateCertificate(data.participant);
             } else {
                 showError(`未查找到您的信息，请核对`, true);
-                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><i class="fas fa-search"></i><p>未查找到您的信息</p><p style="font-size:0.8rem;">请检查输入是否正确</p></div>`;
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><i class="fas fa-search"></i><p>未查找到您的信息</p></div>`;
             }
         } catch (err) {
             showError("查询失败：" + err.message, true);
         }
     }
 
-    // ========== 界面函数 ==========
     function detectRegionFromFilename(filename) {
-        let cleanName = filename.replace(/参赛证明/g, '').replace(/预赛获奖证书/g, '').replace(/决赛获奖证书/g, '').replace(/\.pdf$/i, '').trim();
-        if (validRegions.includes(cleanName)) return cleanName;
         for (const region of validRegions) {
             if (filename.includes(region)) return region;
         }
@@ -715,8 +675,7 @@
 
     function updateTemplateStatusDisplay() {
         const pc = Object.keys(pdfTemplates).length;
-        const total = pc;
-        document.getElementById('templateStatus').innerHTML = total > 0 ? `<i class="fas fa-check-circle"></i> 已加载 ${total} 个模板` : `<i class="fas fa-file-pdf"></i> 暂无模板`;
+        document.getElementById('templateStatus').innerHTML = pc > 0 ? `<i class="fas fa-check-circle"></i> 已加载 ${pc} 个模板` : `<i class="fas fa-file-pdf"></i> 暂无模板`;
 
         const participationContainer = document.getElementById('participationTemplateList');
         if (participationContainer) {
@@ -729,16 +688,6 @@
             } else {
                 participationContainer.innerHTML = '<div class="empty-templates">暂无参赛证明模板</div>';
             }
-        }
-
-        const prelimContainer = document.getElementById('preliminaryTemplateList');
-        if (prelimContainer) {
-            prelimContainer.innerHTML = '<div class="empty-templates">暂无预赛获奖模板</div>';
-        }
-
-        const finalContainer = document.getElementById('finalTemplateList');
-        if (finalContainer) {
-            finalContainer.innerHTML = '<div class="empty-templates">暂无决赛获奖模板</div>';
         }
     }
 
@@ -773,8 +722,8 @@
         input.click();
     };
 
-    // ========== Excel 导入处理（强制第1列为序号，不读取表头） ==========
-        function handleExcelFile(file) {
+    // ========== Excel 导入处理 ==========
+    function handleExcelFile(file) {
         const reader = new FileReader();
         reader.onload = async function(e) {
             try {
@@ -788,7 +737,7 @@
                     return;
                 }
 
-                // 强制列索引
+                // 强制列索引：第1列=序号，第2列=姓名，第3列=赛区，第4列=手机号，第5列=单位
                 const serialIdx = 0;
                 const nameIdx = 1;
                 const regionIdx = 2;
@@ -800,7 +749,9 @@
                 for (let i = 1; i < rows.length; i++) {
                     const row = rows[i];
 
-                    const serialValue = row[serialIdx] !== undefined ? String(row[serialIdx]).trim() : '';
+                    let serialValue = row[serialIdx];
+                    if (serialValue === undefined || serialValue === null) serialValue = "";
+
                     const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
                     const region = row[regionIdx] ? String(row[regionIdx]).trim() : '';
                     const phone = row[phoneIdx] ? String(row[phoneIdx]).trim() : '';
@@ -808,7 +759,7 @@
 
                     console.log(`第${i}行: 序号="${serialValue}", 姓名=${name}, 赛区=${region}, 手机=${phone}`);
 
-                    if (name && region && phone && org && serialValue) {
+                    if (name && region && phone && org && serialValue !== "") {
                         const certificateNumber = generateCertificateNumber(serialValue, region, phone);
 
                         participants.push({
@@ -822,8 +773,9 @@
                     }
                 }
 
+                console.log(`共解析 ${participants.length} 条数据`);
                 if (participants.length === 0) {
-                    alert("没有解析到有效数据");
+                    alert("没有解析到有效数据，请确保Excel格式：\n第1列=序号\n第2列=姓名\n第3列=赛区\n第4列=手机号\n第5列=所在学校");
                     return;
                 }
 
@@ -839,21 +791,14 @@
 
     async function loadDemoData() {
         const demoData = [
-            { 姓名: "李思琪", 赛区: "华北及东北赛区", 手机号: "13812348888", 所在单位: "中国政法大学", 赛区序号: 1, 证书编号: generateCertificateNumber(1, "华北及东北赛区", "13812348888") },
-            { 姓名: "张明", 赛区: "华东赛区", 手机号: "15912345678", 所在单位: "华东政法大学", 赛区序号: 2, 证书编号: generateCertificateNumber(2, "华东赛区", "15912345678") },
-            { 姓名: "欧阳若曦", 赛区: "华南赛区", 手机号: "18712340000", 所在单位: "中山大学", 赛区序号: 3, 证书编号: generateCertificateNumber(3, "华南赛区", "18712340000") },
-            { 姓名: "司马光", 赛区: "西北赛区", 手机号: "15233445566", 所在单位: "西北政法大学", 赛区序号: 4, 证书编号: generateCertificateNumber(4, "西北赛区", "15233445566") },
-            { 姓名: "端木静怡", 赛区: "西南赛区", 手机号: "18912347777", 所在单位: "四川大学", 赛区序号: 5, 证书编号: generateCertificateNumber(5, "西南赛区", "18912347777") }
+            { 姓名: "李思琪", 赛区: "华北及东北赛区", 手机号: "13812348888", 所在单位: "中国政法大学", 赛区序号: "001", 证书编号: "NLEC2026010018888" },
+            { 姓名: "张明", 赛区: "华东赛区", 手机号: "15912345678", 所在单位: "华东政法大学", 赛区序号: "002", 证书编号: "NLEC2026030025678" },
+            { 姓名: "欧阳若曦", 赛区: "华南赛区", 手机号: "18712340000", 所在单位: "中山大学", 赛区序号: "003", 证书编号: "NLEC2026020030000" }
         ];
         await uploadParticipantsToServer(demoData);
-        alert("已加载演示数据到数据库！\n\n可尝试查询：\n姓名: 李思琪\n赛区: 华北及东北赛区\n手机号: 13812348888\n单位: 中国政法大学\n\n证书编号格式：NLEC2026010018888");
-        document.getElementById('fullname').value = "李思琪";
-        document.getElementById('region').value = "华北及东北赛区";
-        document.getElementById('phone').value = "13812348888";
-        document.getElementById('organization').value = "中国政法大学";
+        alert("已加载演示数据！");
     }
 
-    // ========== PDF 渲染函数 ==========
     function formatNameWithSpaces(name) {
         if (!name) return "";
         const trimmed = name.trim();
@@ -964,7 +909,6 @@
             currentResultCanvas = canvas;
             const imageUrl = canvas.toDataURL('image/png');
             const certName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖' : '决赛获奖');
-
             const certificateNumber = participant.证书编号 || "生成中";
 
             document.getElementById('certificateRenderArea').innerHTML = `
@@ -1029,7 +973,6 @@
         }
     };
 
-    // ========== 绑定事件 ==========
     document.getElementById('fileInput').addEventListener('change', e => { if(e.target.files.length) handleExcelFile(e.target.files[0]); });
     document.getElementById('loadSampleBtn').addEventListener('click', loadDemoData);
     document.getElementById('searchBtn').addEventListener('click', performQuery);
@@ -1043,9 +986,8 @@
         if (el) el.addEventListener('keypress', e => { if(e.key === 'Enter') performQuery(); });
     });
 
-    // ========== 启动初始化 ==========
     async function initializeData() {
-        console.log("页面启动，开始初始化...");
+        console.log("页面启动...");
         await loadTemplatesFromFolder();
         await loadParticipantsFromServer();
         console.log("初始化完成");
