@@ -766,8 +766,7 @@
         input.click();
     };
 
-    // ========== Excel 导入处理 ==========
-    // Excel列名：序号 | 姓名 | 赛区 | 手机号 | 所在学校
+    // ========== Excel 导入处理（强制第1列为序号，不读取表头） ==========
     function handleExcelFile(file) {
         const reader = new FileReader();
         reader.onload = async function(e) {
@@ -782,63 +781,54 @@
                     return;
                 }
 
-                // 获取表头，查找列位置（支持中文列名）
-                const headers = rows[0];
-                let serialIdx = -1;    // 序号列
-                let nameIdx = -1;       // 姓名列
-                let regionIdx = -1;     // 赛区列
-                let phoneIdx = -1;      // 手机号列
-                let orgIdx = -1;        // 所在学校/单位列
-
-                for (let i = 0; i < headers.length; i++) {
-                    const h = String(headers[i] || '');
-                    if (h.includes('序号')) serialIdx = i;
-                    if (h.includes('姓名')) nameIdx = i;
-                    if (h.includes('赛区')) regionIdx = i;
-                    if (h.includes('手机')) phoneIdx = i;
-                    if (h.includes('学校') || h.includes('单位')) orgIdx = i;
-                }
-
-                // 如果没找到表头，使用默认列位置（第1列序号，第2列姓名，第3列赛区，第4列手机号，第5列单位）
-                if (serialIdx === -1) serialIdx = 0;
-                if (nameIdx === -1) nameIdx = 1;
-                if (regionIdx === -1) regionIdx = 2;
-                if (phoneIdx === -1) phoneIdx = 3;
-                if (orgIdx === -1) orgIdx = 4;
+                // 强制列索引：第1列(索引0)=序号，第2列(索引1)=姓名，第3列(索引2)=赛区，第4列(索引3)=手机号，第5列(索引4)=单位
+                const serialIdx = 0;   // 第1列：序号
+                const nameIdx = 1;      // 第2列：姓名
+                const regionIdx = 2;    // 第3列：赛区
+                const phoneIdx = 3;     // 第4列：手机号
+                const orgIdx = 4;       // 第5列：所在单位
 
                 const participants = [];
+
+                // 跳过第一行表头，从第2行开始读取
                 for (let i = 1; i < rows.length; i++) {
                     const row = rows[i];
-                    const regionSerialRaw = row[serialIdx] !== undefined && row[serialIdx] !== "" ? row[serialIdx] : null;
+
+                    // 直接按索引读取
+                    const regionSerialRaw = row[serialIdx];
                     const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
                     const region = row[regionIdx] ? String(row[regionIdx]).trim() : '';
                     const phone = row[phoneIdx] ? String(row[phoneIdx]).trim() : '';
                     const org = row[orgIdx] ? String(row[orgIdx]).trim() : '';
 
+                    console.log(`第${i}行: 原始序号=${regionSerialRaw}, 姓名=${name}, 赛区=${region}, 手机=${phone}`);
+
                     if (name && region && phone && org) {
-                        // 处理赛区序号：支持数字或字符串，转为整数
-                        let regionSerial = 0;
-                        if (regionSerialRaw !== null && regionSerialRaw !== "") {
-                            regionSerial = parseInt(regionSerialRaw, 10);
-                            if (isNaN(regionSerial)) regionSerial = 0;
-                        }
+                        // 处理序号：转为数字
+                        let serialNum = Number(regionSerialRaw);
+                        if (isNaN(serialNum)) serialNum = 0;
 
                         // 生成证书编号
-                        const certificateNumber = generateCertificateNumber(regionSerial, region, phone);
+                        const certificateNumber = generateCertificateNumber(serialNum, region, phone);
 
                         participants.push({
                             姓名: name,
                             赛区: region,
                             手机号: phone,
                             所在单位: org,
-                            赛区序号: regionSerial,
+                            赛区序号: serialNum,
                             证书编号: certificateNumber
                         });
                     }
                 }
 
+                console.log(`共解析 ${participants.length} 条数据`);
+                if (participants.length > 0) {
+                    console.log("第一条数据:", participants[0]);
+                }
+
                 if (participants.length === 0) {
-                    alert("请确保Excel包含：序号、姓名、赛区、手机号、所在学校");
+                    alert("没有解析到有效数据，请确保Excel格式：\n第1列=序号\n第2列=姓名\n第3列=赛区\n第4列=手机号\n第5列=所在单位");
                     return;
                 }
 
