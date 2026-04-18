@@ -525,7 +525,7 @@
 
     async function uploadParticipantsToServer(participants) {
         try {
-            console.log("准备上传", participants.length, "条数据到服务器");
+            console.log("准备上传", participants.length, "条数据");
 
             const res = await fetch('/api/participants/upload', {
                 method: 'POST',
@@ -537,7 +537,7 @@
             });
 
             const data = await res.json();
-            console.log("服务器响应:", data);
+            console.log("上传响应:", data);
 
             if (data.success) {
                 alert(`成功导入 ${data.count} 条数据到数据库`);
@@ -619,25 +619,6 @@
         } catch (err) {
             alert('清空失败：' + err.message);
         }
-    }
-
-    // 生成证书编号：NLEC + 2026 + 赛区编码(2位) + 序号(3位补零) + 手机后4位
-    function generateCertificateNumber(regionSerial, region, phone) {
-        const year = "2026";
-
-        // 提取数字部分
-        let serialStr = String(regionSerial).trim();
-        let numMatch = serialStr.match(/\d+/);
-        let serialNum = numMatch ? parseInt(numMatch[0], 10) : 0;
-        let serialPadded = String(serialNum).padStart(3, '0');
-
-        const regionCode = regionCodeMap[region] || "00";
-        const phoneLast4 = phone.slice(-4);
-
-        const result = `NLEC${year}${regionCode}${serialPadded}${phoneLast4}`;
-        console.log(`生成证书: 序号="${regionSerial}" → 数字=${serialNum} → "${serialPadded}", 结果=${result}`);
-
-        return result;
     }
 
     async function performQuery() {
@@ -727,7 +708,8 @@
         input.click();
     };
 
-    // Excel 导入处理
+    // ========== Excel 导入处理（直接从F列读取证书编号） ==========
+    // Excel列说明：A=序号, B=姓名, C=赛区, D=手机号, E=所在单位, F=证书编号
     function handleExcelFile(file) {
         const reader = new FileReader();
         reader.onload = async function(e) {
@@ -742,48 +724,46 @@
                     return;
                 }
 
-                // 固定列索引：第1列=序号，第2列=姓名，第3列=赛区，第4列=手机号，第5列=单位
-                const serialIdx = 0;
-                const nameIdx = 1;
-                const regionIdx = 2;
-                const phoneIdx = 3;
-                const orgIdx = 4;
+                // 列索引：0=A, 1=B, 2=C, 3=D, 4=E, 5=F
+                const serialIdx = 0;    // A列：序号
+                const nameIdx = 1;       // B列：姓名
+                const regionIdx = 2;     // C列：赛区
+                const phoneIdx = 3;      // D列：手机号
+                const orgIdx = 4;        // E列：所在单位
+                const certIdx = 5;       // F列：证书编号
 
                 const participants = [];
 
                 for (let i = 1; i < rows.length; i++) {
                     const row = rows[i];
 
-                    let serialValue = row[serialIdx];
-                    if (serialValue === undefined || serialValue === null) {
-                        serialValue = "";
-                    }
-
+                    const serialValue = row[serialIdx] !== undefined ? String(row[serialIdx]).trim() : '';
                     const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
                     const region = row[regionIdx] ? String(row[regionIdx]).trim() : '';
                     const phone = row[phoneIdx] ? String(row[phoneIdx]).trim() : '';
                     const org = row[orgIdx] ? String(row[orgIdx]).trim() : '';
+                    const certificateNumber = row[certIdx] ? String(row[certIdx]).trim() : '';
 
-                    console.log(`第${i}行: 序号="${serialValue}", 姓名=${name}, 赛区=${region}, 手机=${phone}`);
+                    console.log(`第${i}行: 序号="${serialValue}", 姓名=${name}, 赛区=${region}, 证书编号=${certificateNumber}`);
 
-                    if (name && region && phone && org && serialValue !== "" && serialValue !== undefined) {
-                        const certificateNumber = generateCertificateNumber(serialValue, region, phone);
-
+                    if (name && region && phone && org && certificateNumber) {
                         participants.push({
                             姓名: name,
                             赛区: region,
                             手机号: phone,
                             所在单位: org,
-                            赛区序号: String(serialValue),
+                            赛区序号: serialValue,
                             证书编号: certificateNumber
                         });
+                    } else {
+                        console.warn(`第${i}行数据不完整，跳过`);
                     }
                 }
 
                 console.log(`共解析 ${participants.length} 条有效数据`);
 
                 if (participants.length === 0) {
-                    alert("没有解析到有效数据，请确保Excel格式：\n第1列=序号\n第2列=姓名\n第3列=赛区\n第4列=手机号\n第5列=所在学校");
+                    alert("没有解析到有效数据，请确保Excel格式：\nA列=序号\nB列=姓名\nC列=赛区\nD列=手机号\nE列=所在单位\nF列=证书编号");
                     return;
                 }
 
