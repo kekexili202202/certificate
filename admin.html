@@ -459,6 +459,15 @@
     const ADMIN_KEY = "admin123456";
     const validRegions = ["华北及东北赛区", "西北赛区", "西南赛区", "华东赛区", "华南赛区"];
 
+    // 赛区编码映射表（2位数字编码）
+    const regionCodeMap = {
+        "华北及东北赛区": "01",
+        "华南赛区": "02",
+        "华东赛区": "03",
+        "西南赛区": "04",
+        "西北赛区": "05"
+    };
+
     // HTML 转义函数
     function escapeHtml(str) {
         if (!str) return "";
@@ -470,9 +479,9 @@
         });
     }
 
-    // ========== 直接从 GitHub 仓库加载模板（永久方案） ==========
-    async function loadTemplatesFromGitHub() {
-        console.log("开始从 GitHub 加载模板...");
+    // ========== 直接从 templates_pdf 文件夹加载模板 ==========
+    async function loadTemplatesFromFolder() {
+        console.log("开始从 templates_pdf 文件夹加载模板...");
         const regions = ["华北及东北赛区", "华东赛区", "华南赛区", "西南赛区", "西北赛区"];
 
         pdfTemplates = {};
@@ -498,13 +507,13 @@
         updateTemplateStatusDisplay();
         const count = Object.keys(pdfTemplates).length;
         if (count > 0) {
-            console.log(`已自动从 GitHub 加载 ${count} 个参赛证明模板`);
+            console.log(`已自动加载 ${count} 个参赛证明模板`);
         } else {
             console.warn(`⚠️ 未找到任何模板！`);
         }
     }
 
-    // ========== 从后端数据库加载选手数据（每次打开页面自动调用） ==========
+    // ========== 从后端数据库加载选手数据 ==========
     async function loadParticipantsFromServer() {
         try {
             const res = await fetch('/api/participants');
@@ -531,7 +540,7 @@
         });
     }
 
-    // ========== 上传选手数据到数据库（覆盖旧数据） ==========
+    // ========== 上传选手数据到数据库 ==========
     async function uploadParticipantsToServer(participants) {
         try {
             const res = await fetch('/api/participants/upload', {
@@ -576,7 +585,7 @@
             });
             const data = await res.json();
             if (data.success) {
-                await loadTemplatesFromGitHub();
+                await loadTemplatesFromFolder();
                 return true;
             }
             return false;
@@ -601,7 +610,7 @@
             });
             const data = await res.json();
             if (data.success) {
-                await loadTemplatesFromGitHub();
+                await loadTemplatesFromFolder();
                 return true;
             }
             return false;
@@ -620,12 +629,31 @@
             });
             const data = await res.json();
             if (data.success) {
-                await loadTemplatesFromGitHub();
+                await loadTemplatesFromFolder();
                 alert('已清空所有模板');
             }
         } catch (err) {
             alert('清空失败：' + err.message);
         }
+    }
+
+    // ========== 生成证书编号 ==========
+    // 格式：NLEC + 2026 + 赛区编码(2位) + 赛区序号(3位) + 手机号后4位
+    function generateCertificateNumber(regionSerial, region, phone) {
+        // 1. 年份固定为2026
+        const year = "2026";
+
+        // 2. 赛区编码（2位）
+        const regionCode = regionCodeMap[region] || "00";
+
+        // 3. 赛区序号转3位数（如 6 → "006"）
+        const serialPadded = String(regionSerial).padStart(3, '0');
+
+        // 4. 手机号后4位
+        const phoneLast4 = phone.slice(-4);
+
+        // 5. 组合证书编号
+        return `NLEC${year}${regionCode}${serialPadded}${phoneLast4}`;
     }
 
     // ========== 查询功能 ==========
@@ -735,7 +763,8 @@
         input.click();
     };
 
-    // ========== Excel 导入处理（上传后覆盖数据库） ==========
+    // ========== Excel 导入处理 ==========
+    // Excel列名：序号 | 姓名 | 赛区 | 手机号 | 所在学校
     function handleExcelFile(file) {
         const reader = new FileReader();
         reader.onload = async function(e) {
@@ -750,44 +779,63 @@
                     return;
                 }
 
-                // 获取表头，查找列位置
+                // 获取表头，查找列位置（支持中文列名）
                 const headers = rows[0];
-                let nameIdx = -1, regionIdx = -1, phoneIdx = -1, orgIdx = -1;
+                let serialIdx = -1;    // 序号列
+                let nameIdx = -1;       // 姓名列
+                let regionIdx = -1;     // 赛区列
+                let phoneIdx = -1;      // 手机号列
+                let orgIdx = -1;        // 所在学校/单位列
 
                 for (let i = 0; i < headers.length; i++) {
                     const h = String(headers[i] || '');
+                    if (h.includes('序号')) serialIdx = i;
                     if (h.includes('姓名')) nameIdx = i;
                     if (h.includes('赛区')) regionIdx = i;
                     if (h.includes('手机')) phoneIdx = i;
-                    if (h.includes('单位') || h.includes('学校')) orgIdx = i;
+                    if (h.includes('学校') || h.includes('单位')) orgIdx = i;
                 }
 
-                // 如果没找到表头，使用默认列位置（第1列姓名，第2列赛区，第3列手机号，第4列单位）
-                if (nameIdx === -1) nameIdx = 0;
-                if (regionIdx === -1) regionIdx = 1;
-                if (phoneIdx === -1) phoneIdx = 2;
-                if (orgIdx === -1) orgIdx = 3;
+                // 如果没找到表头，使用默认列位置（第1列序号，第2列姓名，第3列赛区，第4列手机号，第5列单位）
+                if (serialIdx === -1) serialIdx = 0;
+                if (nameIdx === -1) nameIdx = 1;
+                if (regionIdx === -1) regionIdx = 2;
+                if (phoneIdx === -1) phoneIdx = 3;
+                if (orgIdx === -1) orgIdx = 4;
 
                 const participants = [];
                 for (let i = 1; i < rows.length; i++) {
                     const row = rows[i];
+                    const regionSerialRaw = row[serialIdx] !== undefined && row[serialIdx] !== "" ? row[serialIdx] : null;
                     const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
                     const region = row[regionIdx] ? String(row[regionIdx]).trim() : '';
                     const phone = row[phoneIdx] ? String(row[phoneIdx]).trim() : '';
                     const org = row[orgIdx] ? String(row[orgIdx]).trim() : '';
 
                     if (name && region && phone && org) {
+                        // 处理赛区序号：支持数字或字符串，转为整数
+                        let regionSerial = 0;
+                        if (regionSerialRaw !== null && regionSerialRaw !== "") {
+                            regionSerial = parseInt(regionSerialRaw, 10);
+                            if (isNaN(regionSerial)) regionSerial = 0;
+                        }
+
+                        // 生成证书编号
+                        const certificateNumber = generateCertificateNumber(regionSerial, region, phone);
+
                         participants.push({
                             姓名: name,
                             赛区: region,
                             手机号: phone,
-                            所在单位: org
+                            所在单位: org,
+                            赛区序号: regionSerial,
+                            证书编号: certificateNumber
                         });
                     }
                 }
 
                 if (participants.length === 0) {
-                    alert("请确保Excel包含：姓名、赛区、手机号、所在单位");
+                    alert("请确保Excel包含：序号、姓名、赛区、手机号、所在学校");
                     return;
                 }
 
@@ -803,14 +851,14 @@
 
     async function loadDemoData() {
         const demoData = [
-            { 姓名: "李思琪", 赛区: "华北及东北赛区", 手机号: "13812348888", 所在单位: "中国政法大学" },
-            { 姓名: "张明", 赛区: "华东赛区", 手机号: "15912345678", 所在单位: "华东政法大学" },
-            { 姓名: "欧阳若曦", 赛区: "华南赛区", 手机号: "18712340000", 所在单位: "中山大学" },
-            { 姓名: "司马光", 赛区: "西北赛区", 手机号: "15233445566", 所在单位: "西北政法大学" },
-            { 姓名: "端木静怡", 赛区: "西南赛区", 手机号: "18912347777", 所在单位: "四川大学" }
+            { 姓名: "李思琪", 赛区: "华北及东北赛区", 手机号: "13812348888", 所在单位: "中国政法大学", 赛区序号: 1, 证书编号: generateCertificateNumber(1, "华北及东北赛区", "13812348888") },
+            { 姓名: "张明", 赛区: "华东赛区", 手机号: "15912345678", 所在单位: "华东政法大学", 赛区序号: 2, 证书编号: generateCertificateNumber(2, "华东赛区", "15912345678") },
+            { 姓名: "欧阳若曦", 赛区: "华南赛区", 手机号: "18712340000", 所在单位: "中山大学", 赛区序号: 3, 证书编号: generateCertificateNumber(3, "华南赛区", "18712340000") },
+            { 姓名: "司马光", 赛区: "西北赛区", 手机号: "15233445566", 所在单位: "西北政法大学", 赛区序号: 4, 证书编号: generateCertificateNumber(4, "西北赛区", "15233445566") },
+            { 姓名: "端木静怡", 赛区: "西南赛区", 手机号: "18912347777", 所在单位: "四川大学", 赛区序号: 5, 证书编号: generateCertificateNumber(5, "西南赛区", "18912347777") }
         ];
         await uploadParticipantsToServer(demoData);
-        alert("已加载演示数据到数据库！\n\n可尝试查询：\n姓名: 李思琪\n赛区: 华北及东北赛区\n手机号: 13812348888\n单位: 中国政法大学");
+        alert("已加载演示数据到数据库！\n\n可尝试查询：\n姓名: 李思琪\n赛区: 华北及东北赛区\n手机号: 13812348888\n单位: 中国政法大学\n\n证书编号格式：NLEC2026010018888");
         document.getElementById('fullname').value = "李思琪";
         document.getElementById('region').value = "华北及东北赛区";
         document.getElementById('phone').value = "13812348888";
@@ -1010,9 +1058,7 @@
     // ========== 启动初始化 ==========
     async function initializeData() {
         console.log("页面启动，开始初始化...");
-        // 1. 从 GitHub 加载 PDF 模板
-        await loadTemplatesFromGitHub();
-        // 2. 从数据库自动加载选手数据
+        await loadTemplatesFromFolder();
         await loadParticipantsFromServer();
         console.log("初始化完成");
     }
