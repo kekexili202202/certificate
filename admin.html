@@ -647,6 +647,7 @@
         const regionCode = regionCodeMap[region] || "00";
 
         // 3. 赛区序号转3位数（如 6 → "006"）
+        const serialNum = parseInt(regionSerial, 10) || 0;
         const serialPadded = String(regionSerial).padStart(3, '0');
 
         // 4. 手机号后4位
