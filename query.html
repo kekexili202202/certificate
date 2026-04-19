@@ -475,7 +475,7 @@
         return "　" + namePart + "　";
     }
 
-    async function replaceNameAndCertificateOnCanvas(canvas, name, certificateNumber) {
+    async function replaceNameAndCertificateOnCanvas(canvas, name, certificateNumber, certType) {
         return new Promise((resolve) => {
             const ctx = canvas.getContext('2d');
             const width = canvas.width, height = canvas.height;
@@ -549,7 +549,15 @@
             // 绘制证书编号
             if (certificateNumber && certificateNumber !== "") {
                 let certFontSize = Math.floor(fontSize * 0.75);
-                const certX = fixedLeft + 1260;
+                // 根据证书类型选择不同的 X 位置
+                let certX;
+                if (certType === 'preliminary') {
+                    certX = fixedLeft + 1255;  // 预赛获奖证书位置
+                } else if (certType === 'final') {
+                    certX = fixedLeft + 1230;  // 决赛获奖证书位置
+                } else {
+                    certX = fixedLeft + 1260;  // 参赛证明位置
+                }
                 const certY = nameY + fontSize * 0.17;
                 let currentX = certX;
 
@@ -573,7 +581,7 @@
         });
     }
 
-    async function renderPdfWithReplacements(pdfData, name, certificateNumber) {
+    async function renderPdfWithReplacements(pdfData, name, certificateNumber, certType) {
         if (!pdfData || !pdfData.url) throw new Error("模板无效");
         const loadingTask = pdfjsLib.getDocument(pdfData.url);
         const pdf = await loadingTask.promise;
@@ -584,7 +592,7 @@
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
-        return await replaceNameAndCertificateOnCanvas(canvas, name, certificateNumber);
+        return await replaceNameAndCertificateOnCanvas(canvas, name, certificateNumber, certType);
     }
 
     // ==================== 生成最终证书展示 ====================
@@ -639,7 +647,7 @@
 
         try {
             const certificateNumber = participant.证书编号 || "";
-            const canvas = await renderPdfWithReplacements(pdfData, participant.姓名, certificateNumber);
+            const canvas = await renderPdfWithReplacements(pdfData, participant.姓名, certificateNumber, currentCertType);
             currentResultCanvas = canvas;
             const imageUrl = canvas.toDataURL('image/png');
 
