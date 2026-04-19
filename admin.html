@@ -566,7 +566,7 @@
         });
     }
 
-    // 通用的 Excel 上传函数
+    // 通用的 Excel 上传函数 - 追加数据，不清空原有数据
     async function uploadExcelFile(file, certType, needsAwardLevel = false) {
         try {
             const data = new Uint8Array(await file.arrayBuffer());
@@ -584,8 +584,8 @@
             const regionIdx = 2;    // C列
             const phoneIdx = 3;     // D列
             const orgIdx = 4;       // E列
-            const certIdx = 6;      // G列
-            const awardIdx = 7;     // H列
+            const certIdx = 6;      // G列 - 证书编号
+            const awardIdx = 7;     // H列 - 奖项等级
 
             let certTypeDisplay = certType === 'participation' ? '参赛证明' : (certType === 'preliminary' ? '预赛获奖' : '决赛获奖');
             console.log(`上传${certTypeDisplay}数据，需要奖项:${needsAwardLevel}`);
@@ -626,7 +626,31 @@
                 return false;
             }
 
+            // 先获取现有数据，然后合并
+            const existingRes = await fetch('/api/participants');
+            const existingData = await existingRes.json();
+
+            // 过滤掉相同类型的现有数据（避免重复，但不清空其他类型）
+            const otherTypeData = existingData.filter(p => p.证书类型 !== certType);
+
+            // 构建新的 sheets_data，保留其他类型的数据
             const sheets_data = {};
+
+            // 保留其他类型的数据
+            for (const p of otherTypeData) {
+                const type = p.证书类型 || 'participation';
+                if (!sheets_data[type]) sheets_data[type] = [];
+                sheets_data[type].push({
+                    姓名: p.姓名,
+                    赛区: p.赛区,
+                    手机号: p.手机号,
+                    所在单位: p.所在单位,
+                    证书编号: p.证书编号,
+                    奖项等级: p.奖项等级 || ''
+                });
+            }
+
+            // 添加新数据（替换同类型）
             sheets_data[certType] = participants;
 
             const res = await fetch('/api/participants/upload', {
@@ -981,7 +1005,9 @@
     window.uploadFolderTemplates = uploadFolderTemplates;
 
     async function loadDemoData() {
-        // 先清空现有数据
+        if (!confirm('加载演示数据会覆盖现有数据，是否继续？')) return;
+
+        // 清空现有数据
         await clearAllData();
 
         // 添加演示数据
