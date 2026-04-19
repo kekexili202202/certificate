@@ -183,6 +183,10 @@ def upload_participants():
 
     return jsonify({'success': True, 'count': total_count})
 
+@app.route('/templates_pdf/<path:filename>')
+def serve_template_pdf(filename):
+    return send_from_directory('templates_pdf', filename)
+
 @app.route('/api/participants/clear', methods=['DELETE', 'POST'])
 def clear_participants():
     key = request.headers.get('X-Admin-Key')

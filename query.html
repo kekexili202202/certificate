@@ -362,36 +362,39 @@
             }
         }
 
-        // 3. 加载决赛获奖模板
-        for (const region of validRegions) {
-            pdfTemplatesFinal[region] = {};
-            for (const level of awardLevels) {
-                const possibleNames = [
-                    `${region}决赛${level}.pdf`,
-                    `${region}决赛获奖证书${level}.pdf`,
-                    `${region}决赛${level}获奖证书.pdf`
-                ];
+        // 3. 加载决赛获奖模板（不分赛区，只按奖项等级）
+        // 决赛模板文件名格式：决赛一等奖.pdf、决赛二等奖.pdf、决赛三等奖.pdf
+        for (const level of awardLevels) {
+            // 尝试多种可能的文件名格式
+            const possibleNames = [
+                `决赛${level}.pdf`,                    // 决赛一等奖.pdf
+                `决赛获奖证书${level}.pdf`,            // 决赛获奖证书一等奖.pdf
+                `${level}决赛.pdf`                     // 一等奖决赛.pdf
+            ];
 
-                let found = false;
-                for (const fileName of possibleNames) {
-                    const fileUrl = `/templates_pdf/${encodeURIComponent(fileName)}`;
-                    try {
-                        const response = await fetch(fileUrl);
-                        if (response.ok) {
-                            const blob = await response.blob();
-                            const blobUrl = URL.createObjectURL(blob);
-                            pdfTemplatesFinal[region][level] = { url: blobUrl, name: fileName };
-                            console.log(`✅ 加载决赛模板：${fileName}`);
-                            found = true;
-                            break;
+            let found = false;
+            for (const fileName of possibleNames) {
+                const fileUrl = `/templates_pdf/${encodeURIComponent(fileName)}`;
+                try {
+                    const response = await fetch(fileUrl);
+                    if (response.ok) {
+                        const blob = await response.blob();
+                        const blobUrl = URL.createObjectURL(blob);
+                        // 不分赛区，用一个通用键 "all" 或者直接用奖项等级作为键
+                        if (!pdfTemplatesFinal['all']) {
+                            pdfTemplatesFinal['all'] = {};
                         }
-                    } catch (err) {
-                        // 继续尝试
+                        pdfTemplatesFinal['all'][level] = { url: blobUrl, name: fileName };
+                        console.log(`✅ 加载决赛模板：${fileName}`);
+                        found = true;
+                        break;
                     }
+                } catch (err) {
+                    // 继续尝试下一种格式
                 }
-                if (!found) {
-                    console.warn(`⚠️ 未找到决赛模板：${region} ${level}`);
-                }
+            }
+            if (!found) {
+                console.warn(`⚠️ 未找到决赛模板：${level}`);
             }
         }
 
@@ -621,13 +624,15 @@
             certTypeName = `预赛${awardLevel}`;
             console.log(`预赛模板查找: ${region} ${awardLevel}, 找到: ${!!pdfData}`);
         } else {
+            // 决赛获奖证书 - 不分赛区，使用通用模板
             if (!awardLevel) {
                 document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到您的奖项等级信息</p><p style="font-size:0.8rem;">请确认Excel中H列是否填写了奖项等级（一等奖/二等奖/三等奖）</p></div>`;
                 return false;
             }
-            pdfData = pdfTemplatesFinal[region]?.[awardLevel];
+            // 不分赛区，从 'all' 键获取模板
+            pdfData = pdfTemplatesFinal['all']?.[awardLevel];
             certTypeName = `决赛${awardLevel}`;
-            console.log(`决赛模板查找: ${region} ${awardLevel}, 找到: ${!!pdfData}`);
+            console.log(`决赛模板查找: 奖项等级 ${awardLevel}, 找到: ${!!pdfData}`);
         }
 
         if (!pdfData) {

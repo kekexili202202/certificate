@@ -506,7 +506,12 @@
     }
 
     function detectAwardLevelFromFilename(filename, certType) {
-        if (certType === 'preliminary' || certType === 'final') {
+        if (certType === 'preliminary') {
+            if (filename.includes('一等奖')) return '一等奖';
+            if (filename.includes('二等奖')) return '二等奖';
+            if (filename.includes('三等奖')) return '三等奖';
+        } else if (certType === 'final') {
+            // 决赛不检查赛区，只检查奖项等级
             if (filename.includes('一等奖')) return '一等奖';
             if (filename.includes('二等奖')) return '二等奖';
             if (filename.includes('三等奖')) return '三等奖';
@@ -771,13 +776,23 @@
                 }
 
                 let awardLevel = '';
-                if (certType === 'preliminary' || certType === 'final') {
+                if (certType === 'preliminary') {
                     awardLevel = detectAwardLevelFromFilename(file.name, certType);
                     if (!awardLevel) {
                         errors.push(`${file.name}: 无法识别奖项等级（需要包含一等奖/二等奖/三等奖）`);
                         progressDiv.innerHTML = `<i class="fas fa-spinner fa-pulse"></i> 处理中... (${i+1}/${pdfFiles.length}) 发现无效文件: ${file.name}`;
                         continue;
                     }
+                } else if (certType === 'final') {
+                    // 决赛：不检查赛区，只检查奖项等级
+                    awardLevel = detectAwardLevelFromFilename(file.name, certType);
+                    if (!awardLevel) {
+                        errors.push(`${file.name}: 无法识别奖项等级（需要包含一等奖/二等奖/三等奖）`);
+                        progressDiv.innerHTML = `<i class="fas fa-spinner fa-pulse"></i> 处理中... (${i+1}/${pdfFiles.length}) 发现无效文件: ${file.name}`;
+                        continue;
+                    }
+                    // 决赛不需要赛区，用 "all" 代替
+                    region = 'all';
                 }
 
                 progressDiv.innerHTML = `<i class="fas fa-spinner fa-pulse"></i> 正在读取 ${file.name}... (${i+1}/${pdfFiles.length})`;
@@ -837,30 +852,48 @@
         input.onchange = async function(e) {
             if (e.target.files.length) {
                 const file = e.target.files[0];
-                const region = detectRegionFromFilename(file.name);
-                if (!region) {
-                    alert(`无法识别赛区，文件名需包含：${validRegions.join(', ')}`);
-                    return;
-                }
-
+                let region = detectRegionFromFilename(file.name);
                 let awardLevel = '';
+
                 if (certType === 'preliminary') {
+                    // 预赛：需要检测赛区和奖项等级
+                    if (!region) {
+                        alert(`无法识别赛区，文件名需包含：${validRegions.join(', ')}`);
+                        return;
+                    }
                     awardLevel = detectAwardLevelFromFilename(file.name, certType);
                     if (!awardLevel) {
                         alert('预赛证书文件名需包含奖项等级：一等奖、二等奖、三等奖');
                         return;
                     }
                 } else if (certType === 'final') {
+                    // 决赛：不需要赛区，只检测奖项等级
                     awardLevel = detectAwardLevelFromFilename(file.name, certType);
                     if (!awardLevel) {
                         alert('决赛证书文件名需包含奖项等级：一等奖、二等奖、三等奖');
+                        return;
+                    }
+                    // 决赛不需要赛区，用 "all" 代替
+                    region = 'all';
+                } else if (certType === 'participation') {
+                    // 参赛证明：需要检测赛区，不需要奖项等级
+                    if (!region) {
+                        alert(`无法识别赛区，文件名需包含：${validRegions.join(', ')}`);
                         return;
                     }
                 }
 
                 const success = await uploadSingleTemplateToServer(certType, region, awardLevel, file);
                 if (success) {
-                    alert(`✅ 成功添加 ${region} ${awardLevel ? awardLevel : ''} 的模板`);
+                    let successMsg = '';
+                    if (certType === 'participation') {
+                        successMsg = `✅ 成功添加 ${region} 的参赛证明模板`;
+                    } else if (certType === 'preliminary') {
+                        successMsg = `✅ 成功添加 ${region} ${awardLevel} 的预赛模板`;
+                    } else {
+                        successMsg = `✅ 成功添加 ${awardLevel} 的决赛模板`;
+                    }
+                    alert(successMsg);
                     await loadTemplatesFromServer();
                 } else {
                     alert('上传失败');
