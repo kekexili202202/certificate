@@ -150,19 +150,27 @@
             gap: 1rem;
             flex-wrap: wrap;
         }
-        .upload-label {
-            background: #2c5a6e;
-            color: white;
-            padding: 0.6rem 1.2rem;
+        .excel-upload-group {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .excel-upload-btn {
+            padding: 0.5rem 1rem;
             border-radius: 2rem;
             cursor: pointer;
+            font-size: 0.8rem;
             font-weight: 500;
-            font-size: 0.85rem;
+            border: none;
             display: inline-flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
-        #fileInput { display: none; }
+        .excel-upload-btn.participation { background: #e3f2fd; color: #1565c0; }
+        .excel-upload-btn.preliminary { background: #fff3e0; color: #e67e22; }
+        .excel-upload-btn.final { background: #fce4ec; color: #c2185b; }
+        .excel-upload-btn.clear { background: #dc3545; color: white; }
         .data-status, .template-status {
             font-size: 0.85rem;
             padding: 0.4rem 1rem;
@@ -410,8 +418,12 @@
 
     <div class="upload-bar">
         <div class="upload-area">
-            <label class="upload-label" for="fileInput"><i class="fas fa-file-excel"></i> 导入 Excel 数据</label>
-            <input type="file" id="fileInput" accept=".xlsx, .xls, .csv">
+            <div class="excel-upload-group">
+                <button class="excel-upload-btn participation" id="uploadParticipationExcel"><i class="fas fa-file-excel"></i> 导入参赛证明</button>
+                <button class="excel-upload-btn preliminary" id="uploadPreliminaryExcel"><i class="fas fa-file-excel"></i> 导入预赛获奖</button>
+                <button class="excel-upload-btn final" id="uploadFinalExcel"><i class="fas fa-file-excel"></i> 导入决赛获奖</button>
+                <button class="excel-upload-btn clear" id="clearDataBtn"><i class="fas fa-trash-alt"></i> 清空所有数据</button>
+            </div>
             <div class="data-status" id="dataStatus"><i class="fas fa-database"></i> 未加载数据</div>
             <div class="template-status" id="templateStatus"><i class="fas fa-file-pdf"></i> 暂无模板</div>
             <button class="sample-btn" id="loadSampleBtn"><i class="fas fa-chalkboard-user"></i> 加载演示数据</button>
@@ -530,7 +542,6 @@
         try {
             const res = await fetch('/api/participants');
             const data = await res.json();
-            // 统计各类型数量
             const participationCount = data.filter(p => p.证书类型 === 'participation' || p.证书类型 === '').length;
             const preliminaryCount = data.filter(p => p.证书类型 === 'preliminary').length;
             const finalCount = data.filter(p => p.证书类型 === 'final').length;
@@ -555,8 +566,69 @@
         });
     }
 
-    async function uploadParticipantsToServer(sheets_data) {
+    // 通用的 Excel 上传函数
+    async function uploadExcelFile(file, certType, needsAwardLevel = false) {
         try {
+            const data = new Uint8Array(await file.arrayBuffer());
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+            if (!rows.length || rows.length < 2) {
+                alert("Excel无数据");
+                return false;
+            }
+
+            const participants = [];
+            const nameIdx = 1;      // B列
+            const regionIdx = 2;    // C列
+            const phoneIdx = 3;     // D列
+            const orgIdx = 4;       // E列
+            const certIdx = 6;      // G列
+            const awardIdx = 7;     // H列
+
+            let certTypeDisplay = certType === 'participation' ? '参赛证明' : (certType === 'preliminary' ? '预赛获奖' : '决赛获奖');
+            console.log(`上传${certTypeDisplay}数据，需要奖项:${needsAwardLevel}`);
+
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
+                const region = row[regionIdx] ? String(row[regionIdx]).trim() : '';
+                const phone = row[phoneIdx] ? String(row[phoneIdx]).trim() : '';
+                const org = row[orgIdx] ? String(row[orgIdx]).trim() : '';
+                const certificateNumber = row[certIdx] ? String(row[certIdx]).trim() : '';
+                const awardLevel = row[awardIdx] ? String(row[awardIdx]).trim() : '';
+
+                if (name && region && phone && org && certificateNumber) {
+                    const participant = {
+                        姓名: name,
+                        赛区: region,
+                        手机号: phone,
+                        所在单位: org,
+                        证书编号: certificateNumber
+                    };
+
+                    if (needsAwardLevel) {
+                        if (!awardLevel) {
+                            console.warn(`第${i}行缺少奖项等级，跳过: ${name}`);
+                            continue;
+                        }
+                        participant.奖项等级 = awardLevel;
+                        console.log(`数据 - 姓名:${name}, 奖项:${awardLevel}`);
+                    }
+
+                    participants.push(participant);
+                }
+            }
+
+            if (participants.length === 0) {
+                alert(`没有解析到有效数据，请确保Excel格式：\nB列=姓名\nC列=赛区\nD列=手机号\nE列=所在单位\nG列=证书编号${needsAwardLevel ? '\nH列=奖项等级(一等奖/二等奖/三等奖)' : ''}`);
+                return false;
+            }
+
+            const sheets_data = {};
+            sheets_data[certType] = participants;
+
             const res = await fetch('/api/participants/upload', {
                 method: 'POST',
                 headers: {
@@ -566,19 +638,19 @@
                 body: JSON.stringify({ sheets: sheets_data })
             });
 
-            const data = await res.json();
+            const result = await res.json();
 
-            if (data.success) {
-                alert(`成功导入 ${data.count} 条数据到数据库`);
+            if (result.success) {
+                alert(`成功导入 ${participants.length} 条${certTypeDisplay}数据`);
                 await loadParticipantsFromServer();
                 return true;
             } else {
-                alert('上传失败：' + (data.error || '未知错误'));
+                alert('上传失败：' + (result.error || '未知错误'));
                 return false;
             }
         } catch (err) {
-            console.error('上传异常:', err);
-            alert('上传失败：' + err.message);
+            console.error('解析Excel失败:', err);
+            alert("解析Excel失败：" + err.message);
             return false;
         }
     }
@@ -802,6 +874,23 @@
         }
     }
 
+    async function clearAllData() {
+        if (!confirm('清空所有选手数据？此操作不可恢复！')) return;
+        try {
+            const res = await fetch('/api/participants/clear', {
+                method: 'DELETE',
+                headers: { 'X-Admin-Key': ADMIN_KEY }
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert('已清空所有选手数据');
+                await loadParticipantsFromServer();
+            }
+        } catch (err) {
+            alert('清空失败：' + err.message);
+        }
+    }
+
     async function clearAllTemplatesOnServer() {
         if (!confirm('删除所有模板？')) return;
         try {
@@ -891,93 +980,11 @@
     window.uploadSingleTemplate = uploadSingleTemplate;
     window.uploadFolderTemplates = uploadFolderTemplates;
 
-    function handleExcelFile(file) {
-        const reader = new FileReader();
-        reader.onload = async function(e) {
-            try {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-
-                const sheets_data = {
-                    'participation': [],
-                    'preliminary': [],
-                    'final': []
-                };
-
-                for (const sheetName of workbook.SheetNames) {
-                    let cert_type = '';
-                    if (sheetName.includes('参赛证明')) cert_type = 'participation';
-                    else if (sheetName.includes('预赛')) cert_type = 'preliminary';
-                    else if (sheetName.includes('决赛')) cert_type = 'final';
-                    else continue;
-
-                    const sheet = workbook.Sheets[sheetName];
-                    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-
-                    if (!rows.length || rows.length < 2) continue;
-
-                    // 列索引：A=0, B=1(姓名), C=2(赛区), D=3(手机号), E=4(所在单位), F=5(公式), G=6(证书编号), H=7(奖项等级)
-                    const nameIdx = 1;
-                    const regionIdx = 2;
-                    const phoneIdx = 3;
-                    const orgIdx = 4;
-                    const certIdx = 6;
-                    const awardIdx = 7;
-
-                    console.log(`处理sheet: ${sheetName}, 类型: ${cert_type}`);
-
-                    for (let i = 1; i < rows.length; i++) {
-                        const row = rows[i];
-                        const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
-                        const region = row[regionIdx] ? String(row[regionIdx]).trim() : '';
-                        const phone = row[phoneIdx] ? String(row[phoneIdx]).trim() : '';
-                        const org = row[orgIdx] ? String(row[orgIdx]).trim() : '';
-                        const certificateNumber = row[certIdx] ? String(row[certIdx]).trim() : '';
-                        const awardLevel = row[awardIdx] ? String(row[awardIdx]).trim() : '';
-
-                        if (name && region && phone && org && certificateNumber) {
-                            const participant = {
-                                姓名: name,
-                                赛区: region,
-                                手机号: phone,
-                                所在单位: org,
-                                证书编号: certificateNumber
-                            };
-
-                            if (cert_type === 'preliminary' || cert_type === 'final') {
-                                participant.奖项等级 = awardLevel;
-                                console.log(`预赛/决赛数据 - 姓名:${name}, 奖项:${awardLevel}`);
-                            }
-
-                            sheets_data[cert_type].push(participant);
-                        }
-                    }
-                }
-
-                const totalCount = sheets_data.participation.length + sheets_data.preliminary.length + sheets_data.final.length;
-
-                console.log("解析结果:", {
-                    参赛证明: sheets_data.participation.length,
-                    预赛获奖: sheets_data.preliminary.length,
-                    决赛获奖: sheets_data.final.length
-                });
-
-                if (totalCount === 0) {
-                    alert("没有解析到有效数据，请确保Excel格式：\nSheet1:参赛证明\nSheet2:预赛获奖证书\nSheet3:决赛获奖证书\nB列=姓名\nC列=赛区\nD列=手机号\nE列=所在单位\nG列=证书编号\nH列=奖项等级(预赛/决赛专用)");
-                    return;
-                }
-
-                await uploadParticipantsToServer(sheets_data);
-
-            } catch (err) {
-                console.error("解析Excel失败:", err);
-                alert("解析Excel失败：" + err.message);
-            }
-        };
-        reader.readAsArrayBuffer(file);
-    }
-
     async function loadDemoData() {
+        // 先清空现有数据
+        await clearAllData();
+
+        // 添加演示数据
         const sheets_data = {
             'participation': [
                 { 姓名: "李思琪", 赛区: "华北及东北赛区", 手机号: "13812348888", 所在单位: "中国政法大学", 证书编号: "NLEC2026010018888" },
@@ -991,8 +998,23 @@
                 { 姓名: "陈明远", 赛区: "西北赛区", 手机号: "15212345678", 所在单位: "西北政法大学", 证书编号: "NLEC2026050055678", 奖项等级: "三等奖" }
             ]
         };
-        await uploadParticipantsToServer(sheets_data);
-        alert("已加载演示数据！\n预赛数据包含：欧阳若曦(一等奖)、王芳(二等奖)");
+
+        const res = await fetch('/api/participants/upload', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': ADMIN_KEY
+            },
+            body: JSON.stringify({ sheets: sheets_data })
+        });
+
+        const result = await res.json();
+        if (result.success) {
+            alert(`已加载演示数据！\n参赛:2条\n预赛:2条(欧阳若曦-一等奖,王芳-二等奖)\n决赛:1条`);
+            await loadParticipantsFromServer();
+        } else {
+            alert('加载演示数据失败');
+        }
     }
 
     function formatNameWithSpaces(name) {
@@ -1245,7 +1267,38 @@
         }
     };
 
-    document.getElementById('fileInput').addEventListener('change', e => { if(e.target.files.length) handleExcelFile(e.target.files[0]); });
+    // 绑定上传按钮事件
+    document.getElementById('uploadParticipationExcel').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.xlsx, .xls, .csv';
+        input.onchange = (e) => {
+            if (e.target.files.length) uploadExcelFile(e.target.files[0], 'participation', false);
+        };
+        input.click();
+    });
+
+    document.getElementById('uploadPreliminaryExcel').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.xlsx, .xls, .csv';
+        input.onchange = (e) => {
+            if (e.target.files.length) uploadExcelFile(e.target.files[0], 'preliminary', true);
+        };
+        input.click();
+    });
+
+    document.getElementById('uploadFinalExcel').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.xlsx, .xls, .csv';
+        input.onchange = (e) => {
+            if (e.target.files.length) uploadExcelFile(e.target.files[0], 'final', true);
+        };
+        input.click();
+    });
+
+    document.getElementById('clearDataBtn').addEventListener('click', clearAllData);
     document.getElementById('loadSampleBtn').addEventListener('click', loadDemoData);
     document.getElementById('searchBtn').addEventListener('click', performQuery);
     document.getElementById('btnParticipation').addEventListener('click', () => setCertType('participation'));
