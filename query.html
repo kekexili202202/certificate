@@ -187,6 +187,16 @@
             font-size: 0.8rem;
             color: #8b6b42;
         }
+        .award-level {
+            display: inline-block;
+            background: #f0e7db;
+            padding: 0.2rem 0.8rem;
+            border-radius: 1rem;
+            margin-left: 1rem;
+            font-size: 0.75rem;
+            color: #9b2e2e;
+            font-weight: 600;
+        }
         .pdf-container {
             background: white;
             box-shadow: 0 8px 20px rgba(0,0,0,0.15);
@@ -273,8 +283,8 @@
 
     // 模板存储：分别存储参赛证明、预赛、决赛
     let pdfTemplates = {};        // 参赛证明模板 (region -> {url, name})
-    let pdfTemplatesPrelim = {};  // 预赛获奖模板
-    let pdfTemplatesFinal = {};    // 决赛获奖模板
+    let pdfTemplatesPrelim = {};  // 预赛获奖模板 (region -> {url, name})
+    let pdfTemplatesFinal = {};    // 决赛获奖模板 (region -> {url, name})
     let currentCertType = "participation";
     let currentResultCanvas = null;
 
@@ -377,7 +387,7 @@
         }
     }
 
-    // ==================== 查询选手信息 ====================
+    // ==================== 查询选手信息（支持参赛证明、预赛、决赛） ====================
     async function performQuery() {
         const name = document.getElementById('fullname').value.trim();
         const region = document.getElementById('region').value.trim();
@@ -397,24 +407,43 @@
         }
 
         try {
-            const res = await fetch('/api/participants/query', {
+            let url = '/api/participants/query';
+            let body = { name, region, phone, organization: org };
+
+            // 根据证书类型选择不同的查询接口
+            if (currentCertType === 'preliminary') {
+                url = '/api/participants/query_with_award';
+                body.cert_type = 'preliminary';
+            } else if (currentCertType === 'final') {
+                url = '/api/participants/query_with_award';
+                body.cert_type = 'final';
+            }
+
+            console.log(`查询${currentCertType}证书，参数:`, body);
+
+            const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: name,
-                    region: region,
-                    phone: phone,
-                    organization: org
-                })
+                body: JSON.stringify(body)
             });
             const data = await res.json();
+
+            console.log("查询结果:", data);
 
             if (data.found && data.participant) {
                 showError("", false);
                 await generateCertificate(data.participant);
             } else {
-                showError(`未查找到您的信息，请核对姓名、赛区、手机号、单位是否与报名一致`, true);
-                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><i class="fas fa-search"></i><p>未查找到您的信息</p><p style="font-size:0.8rem;">请检查输入是否正确</p></div>`;
+                let errorMsg = '';
+                if (currentCertType === 'participation') {
+                    errorMsg = '未查找到您的参赛信息，请核对姓名、赛区、手机号、单位是否与报名一致';
+                } else if (currentCertType === 'preliminary') {
+                    errorMsg = '未查找到您的预赛获奖信息，请确认是否在预赛获奖名单中';
+                } else {
+                    errorMsg = '未查找到您的决赛获奖信息，请确认是否在决赛获奖名单中';
+                }
+                showError(errorMsg, true);
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><i class="fas fa-search"></i><p>${errorMsg}</p><p style="font-size:0.8rem;">请检查输入是否正确</p></div>`;
             }
         } catch (err) {
             console.error('查询接口错误:', err);
@@ -431,7 +460,7 @@
         return "　" + namePart + "　";
     }
 
-    // 在 canvas 上替换姓名和绘制证书编号
+    // 在 canvas 上替换姓名和绘制证书编号（与参赛证明完全相同的格式）
     async function replaceNameAndCertificateOnCanvas(canvas, name, certificateNumber) {
         return new Promise((resolve) => {
             const ctx = canvas.getContext('2d');
@@ -510,14 +539,14 @@
             ctx.lineTo(fixedLeft + nameWidth + 8, underlineYPos);
             ctx.stroke();
 
-            // ========== 绘制证书编号（前面加上 "NO. "，且 "NO." 加粗） ==========
+            // ========== 绘制证书编号（与参赛证明完全相同的位置和格式） ==========
             if (certificateNumber && certificateNumber !== "") {
-                // 证书编号字号（保持原有设置）
+                // 证书编号字号
                 let certFontSize = Math.floor(fontSize * 0.75);
 
-                // 证书编号位置（保持原有位置）
-                const certX = fixedLeft + 1260;   // 向右偏移
-                const certY = nameY + fontSize * 0.17;  // 姓名下方
+                // 证书编号位置
+                const certX = fixedLeft + 1260;
+                const certY = nameY + fontSize * 0.17;
 
                 let currentX = certX;
 
@@ -527,13 +556,13 @@
                 ctx.fillText("NO.", currentX, certY);
                 currentX += ctx.measureText("NO.").width;
 
-                // 2. 绘制空格（普通字体）
+                // 2. 绘制空格
                 ctx.font = `${certFontSize}px "Times New Roman", serif`;
                 ctx.fillStyle = "#000000";
                 ctx.fillText(" ", currentX, certY);
                 currentX += ctx.measureText(" ").width;
 
-                // 3. 绘制证书编号（不加粗，保持原样）
+                // 3. 绘制证书编号
                 ctx.font = `${certFontSize}px "Times New Roman", serif`;
                 ctx.fillStyle = "#000000";
                 ctx.fillText(certificateNumber, currentX, certY);
@@ -569,12 +598,20 @@
         }
 
         let pdfData = null;
-        if (currentCertType === "participation") pdfData = pdfTemplates[region];
-        else if (currentCertType === "preliminary") pdfData = pdfTemplatesPrelim[region];
-        else pdfData = pdfTemplatesFinal[region];
+        let certTypeName = '';
+
+        if (currentCertType === "participation") {
+            pdfData = pdfTemplates[region];
+            certTypeName = '参赛证明';
+        } else if (currentCertType === "preliminary") {
+            pdfData = pdfTemplatesPrelim[region];
+            certTypeName = '预赛获奖证书';
+        } else {
+            pdfData = pdfTemplatesFinal[region];
+            certTypeName = '决赛获奖证书';
+        }
 
         if (!pdfData) {
-            const certTypeName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖证书' : '决赛获奖证书');
             document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} 的${certTypeName}模板</p><p style="font-size:0.8rem;">请联系管理员上传对应模板到 templates_pdf 文件夹</p></div>`;
             return false;
         }
@@ -584,18 +621,24 @@
 
         try {
             const certificateNumber = participant.证书编号 || "";
+            const awardLevel = participant.奖项等级 || "";
             const canvas = await renderPdfWithReplacements(pdfData, participant.姓名, certificateNumber);
             currentResultCanvas = canvas;
             const imageUrl = canvas.toDataURL('image/png');
-            const certName = currentCertType === 'participation' ? '参赛证明' : (currentCertType === 'preliminary' ? '预赛获奖证书' : '决赛获奖证书');
 
             // 构建展示区域，包含选手信息卡片和证书图片
+            let awardHtml = '';
+            if (awardLevel) {
+                awardHtml = `<span class="award-level"><i class="fas fa-trophy"></i> ${escapeHtml(awardLevel)}</span>`;
+            }
+
             const html = `
                 <div style="display:flex;flex-direction:column;align-items:center;width:100%;">
                     <div class="participant-info-card">
                         <div class="info-row">
                             <span class="participant-name"><i class="fas fa-user"></i> ${escapeHtml(participant.姓名)}</span>
                             <span class="cert-number"><i class="fas fa-certificate"></i> 证书编号：${escapeHtml(certificateNumber || '暂无')}</span>
+                            ${awardHtml}
                         </div>
                         <div class="participant-details">
                             <span><i class="fas fa-map-marker-alt"></i> ${escapeHtml(participant.赛区)}</span>
@@ -616,8 +659,9 @@
             if (downloadBtn) {
                 downloadBtn.onclick = () => {
                     const link = document.createElement('a');
-                    const serialNo = participant.证书编号 ? `_${participant.证书编号}` : '';
-                    link.download = `法律英语大赛_${certName}_${participant.姓名}${serialNo}.png`;
+                    const serialNo = certificateNumber ? `_${certificateNumber}` : '';
+                    const awardSuffix = awardLevel ? `_${awardLevel}` : '';
+                    link.download = `法律英语大赛_${certTypeName}_${participant.姓名}${awardSuffix}${serialNo}.png`;
                     link.href = currentResultCanvas.toDataURL('image/png');
                     link.click();
                 };
@@ -652,7 +696,8 @@
         else document.getElementById('btnFinal').classList.add('active');
 
         // 切换证书类型时清空显示区域，提示重新查询
-        document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>请查询${type === 'participation' ? '参赛证明' : (type === 'preliminary' ? '预赛获奖证书' : '决赛获奖证书')}</p></div>`;
+        let typeName = type === 'participation' ? '参赛证明' : (type === 'preliminary' ? '预赛获奖证书' : '决赛获奖证书');
+        document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>请查询${typeName}</p></div>`;
         showError("", false);
     }
 
