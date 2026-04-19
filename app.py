@@ -147,8 +147,11 @@ def upload_participants():
     c.execute('DELETE FROM participants')
 
     total_count = 0
+    preliminary_count = 0  # 添加计数
 
     for cert_type, participants in sheets_data.items():
+        print(f"处理类型: {cert_type}, 数据量: {len(participants)}")  # 添加日志
+
         for p in participants:
             name = p.get('姓名', '')
             region = p.get('赛区', '')
@@ -158,20 +161,27 @@ def upload_participants():
             certificate_number = p.get('证书编号', '')
             award_level = p.get('奖项等级', '')
 
+            # 添加详细日志
+            print(f"准备插入: 类型={cert_type}, 姓名={name}, 奖项={award_level}")
+
             try:
                 c.execute('''
                     INSERT INTO participants (name, region, region_code, phone, organization, certificate_number, award_level, cert_type)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (name, region, region_code, phone, organization, certificate_number, award_level, cert_type))
                 total_count += 1
+                if cert_type == 'preliminary':
+                    preliminary_count += 1
+                print(f"插入成功: {name}")
             except Exception as e:
                 print(f"插入失败: {e}, 数据: {p}")
 
     conn.commit()
     conn.close()
 
-    return jsonify({'success': True, 'count': total_count})
+    print(f"总计插入: {total_count}, 其中预赛: {preliminary_count}")  # 添加日志
 
+    return jsonify({'success': True, 'count': total_count})
 
 @app.route('/api/participants/clear', methods=['DELETE', 'POST'])
 def clear_participants():
