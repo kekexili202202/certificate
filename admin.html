@@ -512,13 +512,14 @@
             }
 
             const data = await res.json();
-            console.log("模板数据加载成功");
+            console.log("模板数据:", data);
 
             pdfTemplates = data.participation || {};
             pdfTemplatesPrelim = data.preliminary || {};
             pdfTemplatesFinal = data.final || {};
 
             updateTemplateStatusDisplay();
+            console.log("模板加载完成 - 参赛:", Object.keys(pdfTemplates).length, "预赛:", Object.keys(pdfTemplatesPrelim).length, "决赛:", Object.keys(pdfTemplatesFinal).length);
         } catch (err) {
             console.error('加载模板失败:', err);
             document.getElementById('templateStatus').innerHTML = `<i class="fas fa-exclamation-triangle"></i> 加载失败`;
@@ -529,8 +530,12 @@
         try {
             const res = await fetch('/api/participants');
             const data = await res.json();
-            document.getElementById('dataStatus').innerHTML = `<i class="fas fa-check-circle"></i> 已加载 ${data.length} 条数据`;
-            console.log("从数据库加载了", data.length, "条数据");
+            // 统计各类型数量
+            const participationCount = data.filter(p => p.证书类型 === 'participation' || p.证书类型 === '').length;
+            const preliminaryCount = data.filter(p => p.证书类型 === 'preliminary').length;
+            const finalCount = data.filter(p => p.证书类型 === 'final').length;
+            document.getElementById('dataStatus').innerHTML = `<i class="fas fa-check-circle"></i> 参赛:${participationCount} 预赛:${preliminaryCount} 决赛:${finalCount}`;
+            console.log("选手数据 - 参赛:", participationCount, "预赛:", preliminaryCount, "决赛:", finalCount);
             return data;
         } catch (err) {
             console.error('加载选手数据失败', err);
@@ -607,7 +612,6 @@
             return false;
         }
     }
-
 
     async function batchUploadTemplates(templates) {
         try {
@@ -912,12 +916,15 @@
 
                     if (!rows.length || rows.length < 2) continue;
 
+                    // 列索引：A=0, B=1(姓名), C=2(赛区), D=3(手机号), E=4(所在单位), F=5(公式), G=6(证书编号), H=7(奖项等级)
                     const nameIdx = 1;
                     const regionIdx = 2;
                     const phoneIdx = 3;
                     const orgIdx = 4;
                     const certIdx = 6;
                     const awardIdx = 7;
+
+                    console.log(`处理sheet: ${sheetName}, 类型: ${cert_type}`);
 
                     for (let i = 1; i < rows.length; i++) {
                         const row = rows[i];
@@ -939,6 +946,7 @@
 
                             if (cert_type === 'preliminary' || cert_type === 'final') {
                                 participant.奖项等级 = awardLevel;
+                                console.log(`预赛/决赛数据 - 姓名:${name}, 奖项:${awardLevel}`);
                             }
 
                             sheets_data[cert_type].push(participant);
@@ -947,6 +955,12 @@
                 }
 
                 const totalCount = sheets_data.participation.length + sheets_data.preliminary.length + sheets_data.final.length;
+
+                console.log("解析结果:", {
+                    参赛证明: sheets_data.participation.length,
+                    预赛获奖: sheets_data.preliminary.length,
+                    决赛获奖: sheets_data.final.length
+                });
 
                 if (totalCount === 0) {
                     alert("没有解析到有效数据，请确保Excel格式：\nSheet1:参赛证明\nSheet2:预赛获奖证书\nSheet3:决赛获奖证书\nB列=姓名\nC列=赛区\nD列=手机号\nE列=所在单位\nG列=证书编号\nH列=奖项等级(预赛/决赛专用)");
@@ -978,7 +992,7 @@
             ]
         };
         await uploadParticipantsToServer(sheets_data);
-        alert("已加载演示数据！");
+        alert("已加载演示数据！\n预赛数据包含：欧阳若曦(一等奖)、王芳(二等奖)");
     }
 
     function formatNameWithSpaces(name) {
@@ -1090,6 +1104,7 @@
             if (currentCertType !== 'participation') {
                 url = '/api/participants/query_with_award';
                 body.cert_type = currentCertType;
+                console.log(`查询${currentCertType}证书，参数:`, body);
             }
 
             const res = await fetch(url, {
@@ -1099,12 +1114,22 @@
             });
             const data = await res.json();
 
+            console.log("查询结果:", data);
+
             if (data.found) {
                 showError("", false);
                 await generateCertificate(data.participant);
             } else {
-                showError(`未查找到您的${currentCertType === 'participation' ? '参赛信息' : (currentCertType === 'preliminary' ? '预赛获奖信息' : '决赛获奖信息')}，请核对`, true);
-                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><i class="fas fa-search"></i><p>未查找到您的信息</p></div>`;
+                let errorMsg = '';
+                if (currentCertType === 'participation') {
+                    errorMsg = '未查找到您的参赛信息，请核对';
+                } else if (currentCertType === 'preliminary') {
+                    errorMsg = '未查找到您的预赛获奖信息，请确认是否在预赛获奖名单中';
+                } else {
+                    errorMsg = '未查找到您的决赛获奖信息，请确认是否在决赛获奖名单中';
+                }
+                showError(errorMsg, true);
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><i class="fas fa-search"></i><p>${errorMsg}</p></div>`;
             }
         } catch (err) {
             showError("查询失败：" + err.message, true);
@@ -1116,23 +1141,30 @@
         const region = participant.赛区;
         let pdfData = null;
 
+        console.log("生成证书 - 类型:", currentCertType, "选手:", participant);
+
         if (currentCertType === "participation") {
             pdfData = pdfTemplates[region];
+            if (!pdfData) {
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} 的参赛证明模板</p></div>`;
+                return false;
+            }
         } else if (currentCertType === "preliminary") {
             const awardLevel = participant.奖项等级;
             if (!awardLevel) {
-                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到您的奖项等级信息</p></div>`;
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到您的奖项等级信息，请检查Excel中H列是否填写了奖项等级</p></div>`;
                 return false;
             }
             pdfData = pdfTemplatesPrelim[region]?.[awardLevel];
+            console.log("预赛模板查找:", region, awardLevel, "找到:", !!pdfData);
             if (!pdfData) {
-                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} ${awardLevel} 的预赛模板</p></div>`;
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} ${awardLevel} 的预赛模板<br>请确保已上传对应的PDF模板</p></div>`;
                 return false;
             }
         } else {
             const awardLevel = participant.奖项等级;
             if (!awardLevel) {
-                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到您的奖项等级信息</p></div>`;
+                document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到您的奖项等级信息，请检查Excel中H列是否填写了奖项等级</p></div>`;
                 return false;
             }
             pdfData = pdfTemplatesFinal[region]?.[awardLevel];
@@ -1140,11 +1172,6 @@
                 document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} ${awardLevel} 的决赛模板</p></div>`;
                 return false;
             }
-        }
-
-        if (!pdfData) {
-            document.getElementById('certificateRenderArea').innerHTML = `<div class="empty-state"><p>❌ 未找到 ${region} 的模板</p></div>`;
-            return false;
         }
 
         document.getElementById('certificateRenderArea').innerHTML = `<div class="loading"><i class="fas fa-spinner fa-pulse fa-2x"></i><p>正在生成证书...</p></div>`;
